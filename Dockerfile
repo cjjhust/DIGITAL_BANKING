@@ -18,7 +18,7 @@ RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/
 RUN sed -i 's/UsePAM yes/UsePAM no/' /etc/ssh/sshd_config
 # 设置 root 用户的密码 (仅用于测试，生产环境强烈不建议)
 # 密码设置为 'rootpassword'，请根据需要修改
-RUN echo 'cjjhust:198851' | chpasswd
+RUN echo 'root:123456' | chpasswd
 
 # 3. 暴露 SSH 端口
 EXPOSE 22
