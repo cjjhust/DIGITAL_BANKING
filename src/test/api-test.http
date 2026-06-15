@@ -1,0 +1,19 @@
+### 测试 A：提交空数据（触发 400 校验错误）
+POST http://localhost:8080/api/account/transfer
+Content-Type: application/json
+
+{
+    "toAccount": "",
+    "amount": 0
+}
+
+###
+
+### 测试 B：提交正常数据（或触发 403 业务逻辑限制）
+POST http://localhost:8080/api/account/transfer
+Content-Type: application/json
+
+{
+    "toAccount": "DE12345678",
+    "amount": 20000
+}

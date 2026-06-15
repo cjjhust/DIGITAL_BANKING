@@ -1,0 +1,81 @@
+spring: # <-- 顶层 'spring' 键是必需的
+  application:
+    name: banking
+
+  # DataSource 配置 (针对 PostgreSQL，这是您实际想要的)
+  datasource:
+    url: jdbc:postgresql://db:5432/banking_db # **!!! 替换为你的 PostgreSQL 容器地址 !!!**
+    username: admin # **!!! 替换为你的 PostgreSQL 用户名 !!!**
+    password: secret # **!!! 替换为你的 PostgreSQL 密码 !!!**
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      connection-timeout: 30000
+      idle-timeout: 600000
+
+  # JPA/Hibernate 配置
+  jpa:
+    hibernate:
+      ddl-auto: validate # 推荐使用 validate (与 Flyway/Liquibase 配合)
+    show-sql: true # 在控制台打印 SQL (调试用)
+    #properties:
+      #hibernate:
+        #format_sql: true # 格式化 SQL (使 show-sql 更易读)
+    database-platform: org.hibernate.dialect.PostgreSQLDialect # 指定 PostgreSQL 方言
+
+  # Redis 配置
+  data:
+    redis:
+      host: cache # **!!! 替换为你的 Redis 容器服务名或 IP !!!**
+      port: 6379
+      repositories:
+        enabled: true # 启用 Redis repositories (如果你需要)
+
+  # Kafka 配置
+  kafka:
+    bootstrap-servers: localhost:9092 # **!!! 替换为你的 Kafka 容器地址和端口 !!!**
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+
+  # 在 application.yml 中添加 ClickHouse 配置
+  clickhouse:
+    url: jdbc:clickhouse://localhost:8123/your_database # **!!! 替换为你的 ClickHouse 地址, 端口, 数据库名 !!!**
+    username: admin # **!!! 替换为你的 ClickHouse 用户名 !!!**
+    password: secret # **!!! 替换为你的 ClickHouse 密码 !!!**
+    # 可能还需要其他配置，如 driver-class-name, database-platform 等，具体取决于 starter
+    driver-class-name: ru.yandex.clickhouse.ClickHouseDriver
+    # database-platform: org.hibernate.dialect.PostgreSQLDialect # ClickHouse 通常有自己的方言，查阅文档
+
+
+# 启用 Actuator 和 Prometheus 指标收集
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  tracing:
+    enabled: true
+    sampling:
+      probability: 1.0
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    export:
+      prometheus:
+        enabled: true
+
+# Redisson 配置 (如果你在使用)
+redisson:
+  cluster:
+    node:
+      urls: redis://localhost:6379 # **!!! 替换为你的 Redis 容器地址和端口 !!!**
+
+# 日志配置 (使用 Logstash Encoder)
+logging:
+  level:
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql: TRACE
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+
+

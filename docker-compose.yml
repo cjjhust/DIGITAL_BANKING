@@ -1,0 +1,167 @@
+
+services:
+  # 核心账本数据库
+  db:
+    image: postgres:15
+    container_name: banking-db
+    restart: always
+    environment:
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=secret
+      - POSTGRES_DB=banking_db
+    ports:
+      - "5432:5432"
+    volumes:
+      # 建议使用相对路径，这样你把代码拷给面试官看时，他也能跑通
+      - ./data/db:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    networks:
+      - backend
+
+  # 高并发锁与缓存
+  cache:
+    image: redis:7-alpine
+    container_name: banking-cache
+    ports:
+      - "6379:6379"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    networks:
+      - backend
+    # 后端开发通常不需要为 Redis 做磁盘持久化，因为它是临时数据
+  app:
+    build: .
+    container_name: banking-app
+    volumes:
+      - .:/app  # 挂载代码，实现双向同步
+      - ./logs:/app/logs # 挂载日志目录，让 Filebeat 能读取
+    environment:
+      - BANKING_SNOWFLAKE_WORKER_ID=1  # 这里手动指定，防止冲突
+    depends_on:
+      - db
+      - cache
+      - kafka
+      - elasticsearch
+    ports:
+      - "8080:8080"
+      - "2222:22" # 将容器的 22 端口映射到主机的 2222 端口，用于 SSH 访问
+    networks:
+      # app 作为桥梁，同时连接两个网络
+      # frontend 用于接收客户请求，backend 用于访问核心数据
+      - frontend
+      - backend
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  # --- 现代化 Kafka (KRaft 模式)：独立运行，无需 Zookeeper ---
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: banking-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      - CLUSTER_ID=4L6g3nShT-eMCtK--X86sw
+      - KAFKA_NODE_ID=1
+      - KAFKA_PROCESS_ROLES=broker,controller
+      - KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka:9093
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    networks:
+      - backend
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:7.17.9
+    container_name: filebeat
+    user: root # 确保有权限读取挂载的日志文件
+    volumes:
+      - ./filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - ./logs:/usr/share/filebeat/logs:ro
+    depends_on:
+      - elasticsearch
+    networks:
+      - backend
+
+  # --- 增量添加：分布式日志搜索 Elasticsearch 堆栈 ---
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.9
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m" # M4 性能强，给 512M 足够了
+    ports:
+      - "9200:9200"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    networks:
+      - backend
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.17.9
+    container_name: kibana
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    depends_on:
+      - elasticsearch
+    networks:
+      - backend
+
+  # --- 原始监控组件保持不变 ---
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./grafana/provisioning/datasources/prometheus.yml:/etc/prometheus/prometheus.yml # 告诉它去哪抓 app 的数据
+    ports:
+      - "9090:9090"
+    networks:
+      - backend
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin # 默认登录密码
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    networks:
+      - backend
+
+  # --- 增量添加：ClickHouse (海量数据分析引擎) ---
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: banking-clickhouse
+    ports:
+      - "8123:8123" # HTTP 端口
+      - "9000:9000" # 原生客户端端口
+    environment:
+      - CLICKHOUSE_DB=banking_analytics
+      - CLICKHOUSE_USER=admin
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+      - CLICKHOUSE_PASSWORD=secret
+    volumes:
+      - ./clickhouse-init:/docker-entrypoint-initdb.d
+    networks:
+      - backend
+
+networks:
+  frontend:
+    driver: bridge # 模拟公网/外网接入层
+  backend:
+    driver: bridge # 模拟内网数据中心，极致安全

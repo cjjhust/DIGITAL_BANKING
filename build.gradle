@@ -1,0 +1,63 @@
+plugins {
+	id 'java'
+	id 'org.springframework.boot' version '4.0.6'
+	id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'com.jinjing'
+version = '0.0.1-SNAPSHOT'
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(21)
+	}
+}
+
+repositories {
+	mavenCentral()
+	maven { url 'https://repo.redisson.org/release' } // Redisson 官方仓库，可能包含最新版本
+}
+
+dependencies {
+
+    // ClickHouse 官方 JDBC 驱动 (建议使用 all 版本以包含所有必要的依赖，如 http 客户端)
+    implementation 'com.clickhouse:clickhouse-jdbc:0.6.3:all'
+	implementation 'org.springframework.boot:spring-boot-starter-aspectj'
+	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+	implementation 'org.springframework.boot:spring-boot-starter-web'
+	implementation 'org.springframework.boot:spring-boot-starter-validation'
+	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+
+	// 分布式链路追踪核心依赖 - 确保版本一致性
+	implementation platform('io.micrometer:micrometer-tracing-bom:1.5.2')
+	implementation 'io.micrometer:micrometer-tracing-bridge-otel'
+	implementation 'io.opentelemetry:opentelemetry-exporter-zipkin'
+	implementation 'org.springframework.kafka:spring-kafka'
+	// 增加 JSON 格式日志支持
+	implementation 'net.logstash.logback:logstash-logback-encoder:8.1'
+
+	implementation 'org.redisson:redisson-spring-boot-starter:4.1.0'
+	runtimeOnly 'io.micrometer:micrometer-registry-prometheus' // 将指标格式化为 Prometheus 识别的格式
+
+	compileOnly 'org.projectlombok:lombok'
+	runtimeOnly 'org.postgresql:postgresql'
+	annotationProcessor 'org.projectlombok:lombok'
+
+	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+	testImplementation 'org.springframework.boot:spring-boot-testcontainers' // 4.0.6 必须显式引入以支持 @ServiceConnection
+	testImplementation 'org.testcontainers:clickhouse:1.20.1' // 4.0.6 BOM 不包含此模块，必须显式指定版本
+
+	developmentOnly 'org.springframework.boot:spring-boot-devtools'
+	// 增加 H2 数据库用于单元测试，避免由于物理数据库表缺失导致 contextLoads 失败
+	testImplementation 'com.h2database:h2'
+	testCompileOnly 'org.projectlombok:lombok'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+	testAnnotationProcessor 'org.projectlombok:lombok'
+
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+}
+
+tasks.named('test') {
+	useJUnitPlatform()
+}

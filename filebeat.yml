@@ -1,0 +1,17 @@
+filebeat.inputs:
+- type: log
+  enabled: true
+  paths:
+    - /usr/share/filebeat/logs/*.json.log
+  # 因为 Logback 已经打成了 JSON，让 Filebeat 直接解析
+  json.keys_under_root: true
+  json.add_error_key: true
+
+output.elasticsearch:
+  hosts: ["elasticsearch:9200"]
+  index: "banking-logs-%{+yyyy.MM.dd}"
+
+# 允许自定义索引
+setup.ilm.enabled: false
+setup.template.name: "banking"
+setup.template.pattern: "banking-*"

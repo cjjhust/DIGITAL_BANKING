@@ -1,0 +1,6 @@
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.8.0'
+}
+
+// 这是项目的法定名称，决定了产物 JAR 的文件名
+rootProject.name = 'banking'

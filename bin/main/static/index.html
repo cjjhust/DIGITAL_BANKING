@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>High Performance Banking System</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #f4f7f6; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); max-width: 400px; }
+        input { display: block; width: 100%; margin: 10px 0; padding: 8px; box-sizing: border-box; }
+        button { background: #2c3e50; color: white; border: none; padding: 10px; width: 100%; cursor: pointer; border-radius: 4px; }
+        #result { margin-top: 20px; padding: 10px; border-radius: 4px; display: none; }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>🏦 Transfer Money</h2>
+        <input type="text" id="fromAccount" placeholder="From Account Number (e.g. 001)">
+        <input type="text" id="toAccount" placeholder="To Account Number (e.g. 002)">
+        <input type="number" id="amount" placeholder="Amount">
+        <button onclick="executeTransfer()">Confirm Transfer</button>
+        <div id="result"></div>
+    </div>
+
+    <script>
+        async function executeTransfer() {
+            const resultDiv = document.getElementById('result');
+            // 生成 UUID 作为幂等性 Key
+            const requestId = crypto.randomUUID();
+            
+            const payload = {
+                requestId: requestId,
+                fromAccountNumber: document.getElementById('fromAccount').value,
+                toAccountNumber: document.getElementById('toAccount').value,
+                amount: document.getElementById('amount').value
+            };
+
+            try {
+                const response = await fetch('/api/account/transfer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const message = await response.text();
+                resultDiv.style.display = 'block';
+                if (response.ok) {
+                    resultDiv.className = 'success';
+                    resultDiv.innerHTML = `<strong>Accepted!</strong><br>Request ID: ${requestId}<br>Message: ${message}`;
+                } else {
+                    resultDiv.className = 'error';
+                    resultDiv.innerText = 'Error: ' + message;
+                }
+            } catch (err) {
+                resultDiv.style.display = 'block';
+                resultDiv.className = 'error';
+                resultDiv.innerText = 'Failed to connect to server.';
+            }
+        }
+    </script>
+</body>
+</html>
