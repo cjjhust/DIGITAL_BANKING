@@ -17,3 +17,8 @@ logs/
 
 ### Docker ###
 .docker/
+
+# Environment files (secrets)
+.env
+*.env.local
+src/main/resources/application-secrets.yml
