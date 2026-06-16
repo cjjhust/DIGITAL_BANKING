@@ -16,6 +16,7 @@ spring: # <-- 顶层 'spring' 键是必需的
   jpa:
     hibernate:
       ddl-auto: validate # 推荐使用 validate (与 Flyway/Liquibase 配合)
+      open-in-view: false # 建议关闭，以避免生产环境中的性能问题和长事务
     show-sql: true # 在控制台打印 SQL (调试用)
     #properties:
       #hibernate:
@@ -78,4 +79,10 @@ logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
 
-
+# JWT 配置
+app:
+  #jwtSecret: <至少 256 位的强密钥>  # ❌ 不要用默认值！
+  jwtSecret: ${APP_JWT_SECRET:}
+  jwtExpirationMs: 3600000 # 1 小时（单位：毫秒）调整过期时间
+  # 建议增加：RefreshToken 过期时间
+  jwtRefreshExpirationMs: 86400000 # 24 小时

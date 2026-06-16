@@ -40,6 +40,8 @@ services:
     volumes:
       - .:/app  # 挂载代码，实现双向同步
       - ./logs:/app/logs # 挂载日志目录，让 Filebeat 能读取
+    env_file:
+      - .env
     environment:
       - BANKING_SNOWFLAKE_WORKER_ID=1  # 这里手动指定，防止冲突
     depends_on:
@@ -49,7 +51,7 @@ services:
       - elasticsearch
     ports:
       - "8080:8080"
-      - "2222:22" # 将容器的 22 端口映射到主机的 2222 端口，用于 SSH 访问
+      - "2233:22" # 将容器的 22 端口映射到主机的 2233 端口，用于 SSH 访问
     networks:
       # app 作为桥梁，同时连接两个网络
       # frontend 用于接收客户请求，backend 用于访问核心数据
