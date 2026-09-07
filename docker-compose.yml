@@ -41,6 +41,7 @@ services:
     container_name: banking-app
     volumes:
       - .:/app
+      - banking-app-build:/app/build
       - ./logs:/app/logs
       - /Users/cjjhust/.ssh/authorized_keys:/root/.ssh/authorized_keys
     env_file:
@@ -204,3 +205,6 @@ networks:
     driver: bridge
   backend:
     driver: bridge
+
+volumes:
+  banking-app-build:
