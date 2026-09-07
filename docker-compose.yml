@@ -1,4 +1,3 @@
-
 services:
   # 核心账本数据库
   db:
@@ -12,12 +11,13 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      # 建议使用相对路径，这样你把代码拷给面试官看时，他也能跑通
       - ./data/db:/var/lib/postgresql/data
     deploy:
       resources:
         limits:
           memory: 512M
+        reservations:
+          memory: 256M
     networks:
       - backend
 
@@ -31,19 +31,22 @@ services:
       resources:
         limits:
           memory: 256M
+        reservations:
+          memory: 128M
     networks:
       - backend
-    # 后端开发通常不需要为 Redis 做磁盘持久化，因为它是临时数据
+
   app:
     build: .
     container_name: banking-app
     volumes:
-      - .:/app  # 挂载代码，实现双向同步
-      - ./logs:/app/logs # 挂载日志目录，让 Filebeat 能读取
+      - .:/app
+      - ./logs:/app/logs
+      - /Users/cjjhust/.ssh/authorized_keys:/root/.ssh/authorized_keys
     env_file:
       - .env
     environment:
-      - BANKING_SNOWFLAKE_WORKER_ID=1  # 这里手动指定，防止冲突
+      - BANKING_SNOWFLAKE_WORKER_ID=1
     depends_on:
       - db
       - cache
@@ -51,18 +54,18 @@ services:
       - elasticsearch
     ports:
       - "8080:8080"
-      - "2233:22" # 将容器的 22 端口映射到主机的 2233 端口，用于 SSH 访问
+      - "2233:22"
     networks:
-      # app 作为桥梁，同时连接两个网络
-      # frontend 用于接收客户请求，backend 用于访问核心数据
       - frontend
       - backend
     deploy:
       resources:
         limits:
+          memory: 2G
+        reservations:
           memory: 1G
 
-  # --- 现代化 Kafka (KRaft 模式)：独立运行，无需 Zookeeper ---
+  # Kafka 优化
   kafka:
     image: confluentinc/cp-kafka:7.6.0
     container_name: banking-kafka
@@ -77,38 +80,50 @@ services:
       - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
       - KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka:9093
       - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_HEAP_OPTS=-Xmx1G -Xms1G  # 增加堆内存
     deploy:
       resources:
         limits:
           memory: 1G
+        reservations:
+          memory: 512M
     networks:
       - backend
 
   filebeat:
     image: docker.elastic.co/beats/filebeat:7.17.9
     container_name: filebeat
-    user: root # 确保有权限读取挂载的日志文件
+    user: root
     volumes:
       - ./filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
       - ./logs:/usr/share/filebeat/logs:ro
     depends_on:
       - elasticsearch
+    deploy:
+      resources:
+        limits:
+          memory: 150M
+        reservations:
+          memory: 64M
     networks:
       - backend
 
-  # --- 增量添加：分布式日志搜索 Elasticsearch 堆栈 ---
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:7.17.9
     container_name: elasticsearch
     environment:
       - discovery.type=single-node
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m" # M4 性能强，给 512M 足够了
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - bootstrap.memory_lock=false
+      - xpack.security.enabled=false
     ports:
       - "9200:9200"
     deploy:
       resources:
         limits:
-          memory: 1G
+          memory: 800M
+        reservations:
+          memory: 512M
     networks:
       - backend
 
@@ -121,16 +136,27 @@ services:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
     depends_on:
       - elasticsearch
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
     networks:
       - backend
 
-  # --- 原始监控组件保持不变 ---
   prometheus:
     image: prom/prometheus:latest
     volumes:
-      - ./grafana/provisioning/datasources/prometheus.yml:/etc/prometheus/prometheus.yml # 告诉它去哪抓 app 的数据
+      - ./grafana/provisioning/datasources/prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
       - "9090:9090"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
     networks:
       - backend
 
@@ -139,19 +165,24 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin # 默认登录密码
+      - GF_SECURITY_ADMIN_PASSWORD=admin
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
     networks:
       - backend
 
-  # --- 增量添加：ClickHouse (海量数据分析引擎) ---
   clickhouse:
     image: clickhouse/clickhouse-server:latest
     container_name: banking-clickhouse
     ports:
-      - "8123:8123" # HTTP 端口
-      - "9000:9000" # 原生客户端端口
+      - "8123:8123"
+      - "9000:9000"
     environment:
       - CLICKHOUSE_DB=banking_analytics
       - CLICKHOUSE_USER=admin
@@ -159,11 +190,17 @@ services:
       - CLICKHOUSE_PASSWORD=secret
     volumes:
       - ./clickhouse-init:/docker-entrypoint-initdb.d
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
     networks:
       - backend
 
 networks:
   frontend:
-    driver: bridge # 模拟公网/外网接入层
+    driver: bridge
   backend:
-    driver: bridge # 模拟内网数据中心，极致安全
+    driver: bridge

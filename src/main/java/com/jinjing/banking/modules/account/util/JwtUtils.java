@@ -56,11 +56,11 @@ public class JwtUtils {
     public String getUsernameFromToken(String token) {
         try {
             SecretKey key = Keys.hmacShaKeyFor(jwtSecret.getBytes());
-            Claims claims = Jwts.parserBuilder()
-                .setSigningKey(key)
+            Claims claims = Jwts.parser()
+                .verifyWith(key)
                 .build()
-                .parseClaimsJws(token)
-                .getBody();
+                .parseSignedClaims(token)
+                .getPayload();
             return claims.getSubject();
         } catch (ExpiredJwtException e) {
             log.warn("JWT token 已过期");
@@ -82,15 +82,14 @@ public class JwtUtils {
 
     /**
      * 验证 JWT Token 是否有效
-     * 返回 true 表示 token 有效且未过期
      */
     public boolean validateToken(String token) {
         try {
             SecretKey key = Keys.hmacShaKeyFor(jwtSecret.getBytes());
-            Jwts.parserBuilder()
-                .setSigningKey(key)
+            Jwts.parser()
+                .verifyWith(key)
                 .build()
-                .parseClaimsJws(token);
+                .parseSignedClaims(token);
             return true;
         } catch (ExpiredJwtException e) {
             log.warn("JWT token 已过期: {}", e.getMessage());

@@ -53,7 +53,7 @@ public class AccountController {
     private static final long CUSTOM_EPOCH = 1704067200000L; // 2024-01-01
 
     @PostMapping
-    @PreAuthorize("hasRole('USER')")
+    @PreAuthorize("hasAnyRole('USER','ADMIN')")
     public ResponseEntity<Account> createAccount(@Valid @RequestBody AccountCreateDTO request) {
         // 修复：Account 构造函数是 PROTECTED。必须使用 @Builder 实例化。
         // 面试点：Builder 模式在处理多字段对象时比 new 更安全，且能保证对象创建的原子性。
@@ -67,7 +67,7 @@ public class AccountController {
     }
 
     @GetMapping("/{accountNumber}")
-    @PreAuthorize("hasRole('USER')")
+    @PreAuthorize("hasAnyRole('USER','ADMIN')")
     public ResponseEntity<Account> getAccount(@PathVariable String accountNumber) {
         return accountService.getAccount(accountNumber)
                 .map(ResponseEntity::ok)
@@ -75,13 +75,14 @@ public class AccountController {
     }
 
     @GetMapping("/{accountNumber}/transactions")
+    @PreAuthorize("hasAnyRole('USER','ADMIN')")
     public ResponseEntity<Page<ProcessedTransaction>> getAccountTransactions(@PathVariable String accountNumber, Pageable pageable) {
         Page<ProcessedTransaction> transactions = accountService.getTransactionHistory(accountNumber, pageable);
         return ResponseEntity.ok(transactions);
     }
 
     @PostMapping("/transfer")
-    @PreAuthorize("hasRole('USER')")
+    @PreAuthorize("hasAnyRole('USER','ADMIN')")
     @Transactional // 硬核点：开启事务，保证业务 ID 生成和 Outbox 记录在同一个本地事务中
     @SneakyThrows
     public ResponseEntity<String> transfer(@Valid @RequestBody TransferRequest request) {

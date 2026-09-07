@@ -40,12 +40,16 @@ dependencies {
 	implementation 'org.redisson:redisson-spring-boot-starter:4.1.0'
 	runtimeOnly 'io.micrometer:micrometer-registry-prometheus' // 将指标格式化为 Prometheus 识别的格式
 
-	compileOnly 'org.projectlombok:lombok'
+	compileOnly 'org.projectlombok:lombok:1.18.34'
 	runtimeOnly 'org.postgresql:postgresql'
-	annotationProcessor 'org.projectlombok:lombok'
+	annotationProcessor 'org.projectlombok:lombok:1.18.34'
 
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testImplementation 'org.springframework.boot:spring-boot-testcontainers' // 4.0.6 必须显式引入以支持 @ServiceConnection
+	testImplementation 'org.testcontainers:testcontainers:1.20.1'
+	testImplementation 'org.testcontainers:postgresql:1.20.1'
+	testImplementation 'org.testcontainers:kafka:1.20.1'
+	testImplementation 'org.testcontainers:junit-jupiter:1.20.1'
 	testImplementation 'org.testcontainers:clickhouse:1.20.1' // 4.0.6 BOM 不包含此模块，必须显式指定版本
 
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
@@ -56,6 +60,8 @@ dependencies {
 	testAnnotationProcessor 'org.projectlombok:lombok'
 
     implementation 'org.springframework.boot:spring-boot-starter-security'
+	implementation 'org.flywaydb:flyway-core'
+	implementation 'org.flywaydb:flyway-database-postgresql'
 	
 	// JWT 处理库 (用于生成、验证 Token)
 	implementation 'io.jsonwebtoken:jjwt-api:0.12.3'
