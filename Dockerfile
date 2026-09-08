@@ -29,5 +29,5 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # 5. 使用 entrypoint 脚本作为容器的入口点
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-# 6. 保持容器运行，防止它因为没任务直接退出
-CMD ["sleep", "infinity"]
+# 6. 在 Docker 网络中启动 Spring Boot，确保可以解析 db、cache 和 kafka
+CMD ["./gradlew", "bootRun"]
