@@ -84,6 +84,7 @@ public class SecurityConfig {
                 // 允许匿名访问的端点
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/api/public/**").permitAll()
+                .requestMatchers("/", "/index.html", "/favicon.ico").permitAll()
                 .requestMatchers("/actuator/health").permitAll()
                 .requestMatchers("/actuator/prometheus").permitAll()
 
