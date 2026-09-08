@@ -13,8 +13,16 @@ import java.time.LocalDateTime;
 @Getter @Setter @NoArgsConstructor(access = AccessLevel.PROTECTED) // 满足 JPA 规范且防误用
 @AllArgsConstructor @Builder
 public class Account {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Id @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "acc_seq")
+    /* 
+     * 修改点：改 IDENTITY 为 SEQUENCE
+     * generator 指定生成器名称
+     * sequenceName 指定数据库中序列的名字
+     * 使用 SEQUENCE 可以在 persist() 调用后立即获得 ID，而不需要触发 flush 或等待事务提交，这让领域模型的逻辑更连贯
+     * allocationSize 建议设为 1 (面试加分：若设为 50 则是为了极致性能，但需要额外配置)
+     * 配合 allocationSize（分段申请 ID），减少了高并发下与数据库的往返次数（Round-trips）
+     */
+    @SequenceGenerator(name = "acc_seq", sequenceName = "accounts_id_seq", allocationSize = 1)
     private Long id;
 
     @NotBlank(message = "Account number is required") // 新增：安检 1
