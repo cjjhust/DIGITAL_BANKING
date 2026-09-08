@@ -1,7 +1,7 @@
 package  com.jinjing.banking.modules.analytics.consumer;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.core.JsonProcessingException;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
 import com.jinjing.banking.modules.account.dto.TransferRequest;
 import io.micrometer.tracing.Tracer;
 import lombok.RequiredArgsConstructor;
@@ -65,7 +65,7 @@ public class TransactionAnalyticsConsumer {
                         "span", getSpanId(),
                         "ts", createdAt
                     ));
-                } catch (JsonProcessingException e) {
+                } catch (JacksonException e) {
                     log.error("Invalid message format for transaction: {}", transactionId, e);
                 } catch (Exception e) {
                     log.error("ClickHouse Audit Failed for transaction: {}", transactionId, e);

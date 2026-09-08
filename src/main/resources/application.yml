@@ -9,11 +9,11 @@ spring:
     baseline-on-migrate: true
     validate-on-migrate: true
 
-  # DataSource 配置 (针对 PostgreSQL，这是您实际想要的)
+  # DataSource 配置
   datasource:
-    url: jdbc:postgresql://banking-db:5432/banking_db # **!!! 替换为你的 PostgreSQL 容器地址 !!!**
-    username: admin # **!!! 替换为你的 PostgreSQL 用户名 !!!**
-    password: secret # **!!! 替换为你的 PostgreSQL 密码 !!!**
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://db:5432/banking_db}
+    username: ${SPRING_DATASOURCE_USERNAME:admin}
+    password: ${SPRING_DATASOURCE_PASSWORD:secret}
     driver-class-name: org.postgresql.Driver
     hikari:
       connection-timeout: 30000
@@ -33,24 +33,23 @@ spring:
   # Redis 配置
   data:
     redis:
-      host: cache # **!!! 替换为你的 Redis 容器服务名或 IP !!!**
-      port: 6379
+      host: ${SPRING_DATA_REDIS_HOST:cache}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
       repositories:
         enabled: true # 启用 Redis repositories (如果你需要)
 
   # Kafka 配置
   kafka:
-    bootstrap-servers: kafka:9092 # 使用 Kafka 容器服务名
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
 
-  # 在 application.yml 中添加 ClickHouse 配置
   clickhouse:
-    url: jdbc:clickhouse://banking-clickhouse:8123/banking_analytics
-    username: admin
-    password: secret
-    driver-class-name: ru.yandex.clickhouse.ClickHouseDriver
+    jdbc-url: ${SPRING_CLICKHOUSE_URL:jdbc:clickhouse://clickhouse:8123/banking_analytics}
+    username: ${SPRING_CLICKHOUSE_USERNAME:admin}
+    password: ${SPRING_CLICKHOUSE_PASSWORD:secret}
+    driver-class-name: com.clickhouse.jdbc.ClickHouseDriver
 
 
 # 启用 Actuator 和 Prometheus 指标收集
@@ -70,11 +69,11 @@ management:
       prometheus:
         enabled: true
 
-# Redisson 配置 (如果你在使用)
+# Redisson 配置
 redisson:
   cluster:
     node:
-      urls: redis://banking-cache:6379
+      urls: ${REDIS_URL:redis://cache:6379}
 
 # 日志配置 (使用 Logstash Encoder)
 logging:

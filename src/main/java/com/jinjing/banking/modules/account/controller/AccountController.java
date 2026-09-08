@@ -18,7 +18,7 @@ import com.jinjing.banking.modules.transaction.entity.OutboxEvent;
 import com.jinjing.banking.modules.transaction.repository.OutboxEventRepository;
 import com.jinjing.banking.modules.transaction.repository.ProcessedTransactionRepository;
 import com.jinjing.banking.modules.transaction.entity.ProcessedTransaction;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.concurrent.atomic.AtomicLong;
 import io.micrometer.core.instrument.MeterRegistry;
