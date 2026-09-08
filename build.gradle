@@ -7,6 +7,8 @@ plugins {
 group = 'com.jinjing'
 version = '0.0.1-SNAPSHOT'
 
+def lombokVersion = '1.18.42'
+
 java {
 	toolchain {
 		languageVersion = JavaLanguageVersion.of(21)
@@ -41,9 +43,9 @@ dependencies {
 	implementation 'org.redisson:redisson-spring-boot-starter:4.1.0'
 	runtimeOnly 'io.micrometer:micrometer-registry-prometheus' // 将指标格式化为 Prometheus 识别的格式
 
-	compileOnly 'org.projectlombok:lombok:1.18.34'
+	compileOnly "org.projectlombok:lombok:${lombokVersion}"
 	runtimeOnly 'org.postgresql:postgresql'
-	annotationProcessor 'org.projectlombok:lombok:1.18.34'
+	annotationProcessor "org.projectlombok:lombok:${lombokVersion}"
 
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testImplementation 'org.springframework.boot:spring-boot-testcontainers' // 4.0.6 必须显式引入以支持 @ServiceConnection
@@ -56,9 +58,9 @@ dependencies {
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
 	// 增加 H2 数据库用于单元测试，避免由于物理数据库表缺失导致 contextLoads 失败
 	testImplementation 'com.h2database:h2'
-	testCompileOnly 'org.projectlombok:lombok'
+	testCompileOnly "org.projectlombok:lombok:${lombokVersion}"
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-	testAnnotationProcessor 'org.projectlombok:lombok'
+	testAnnotationProcessor "org.projectlombok:lombok:${lombokVersion}"
 
     implementation 'org.springframework.boot:spring-boot-starter-security'
 	implementation 'org.flywaydb:flyway-core'
