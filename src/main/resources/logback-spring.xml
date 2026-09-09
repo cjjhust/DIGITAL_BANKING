@@ -9,12 +9,13 @@
         </encoder>
     </appender>
 
-    <!-- JSON 输出：专门给 Elasticsearch/Filebeat 使用 -->
+    <!-- JSON 输出：生产环境下写入独立日志卷，避免将日志混进项目目录 -->
     <appender name="LOGSTASH" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>logs/app.json.log</file>
+        <file>/var/log/banking/app.json.log</file>
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>logs/app.json.%d{yyyy-MM-dd}.log</fileNamePattern>
-            <maxHistory>7</maxHistory>
+            <fileNamePattern>/var/log/banking/app.json.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>1GB</totalSizeCap>
         </rollingPolicy>
         <encoder class="net.logstash.logback.encoder.LogstashEncoder"/>
     </appender>

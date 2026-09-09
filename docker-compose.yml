@@ -41,7 +41,7 @@ services:
     container_name: banking-app
     volumes:
       - .:/app
-      - ./logs:/app/logs
+      - banking-logs:/var/log/banking
       - /Users/cjjhust/.ssh/authorized_keys:/root/.ssh/authorized_keys
     env_file:
       - .env
@@ -96,7 +96,7 @@ services:
     user: root
     volumes:
       - ./filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
-      - ./logs:/usr/share/filebeat/logs:ro
+      - banking-logs:/var/log/banking:ro
     depends_on:
       - elasticsearch
     deploy:
@@ -207,3 +207,5 @@ networks:
 
 volumes:
   postgres-data:
+  banking-logs:
+    driver: local

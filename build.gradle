@@ -7,7 +7,7 @@ plugins {
 group = 'com.jinjing'
 version = '0.0.1-SNAPSHOT'
 
-def lombokVersion = '1.18.42'
+def lombokVersion = '1.18.36'
 
 java {
 	toolchain {
