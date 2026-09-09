@@ -11,7 +11,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ./data/db:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
     deploy:
       resources:
         limits:
@@ -204,3 +204,6 @@ networks:
     driver: bridge
   backend:
     driver: bridge
+
+volumes:
+  postgres-data:

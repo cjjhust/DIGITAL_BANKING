@@ -18,6 +18,10 @@ logs/
 ### Docker ###
 .docker/
 
+### Local database data ###
+data/
+backups/
+
 # Environment files (secrets)
 .env
 *.env.local
