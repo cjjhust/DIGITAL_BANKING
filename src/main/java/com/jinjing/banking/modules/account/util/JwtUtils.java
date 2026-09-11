@@ -10,6 +10,9 @@ import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import java.util.Date;
+import java.util.Map;
+
+import org.springframework.data.redis.core.StringRedisTemplate;
 
 /**
  * JWT Token 工具类
@@ -25,18 +28,27 @@ public class JwtUtils {
     @Value("${app.jwtExpirationMs:3600000}")
     private long jwtExpirationMs;
 
+    private final StringRedisTemplate redisTemplate;
+
+    public JwtUtils(StringRedisTemplate redisTemplate) {
+        this.redisTemplate = redisTemplate;
+    }
+
     /**
      * 从 Authentication 对象生成 JWT Token
      */
     public String generateToken(Authentication authentication) {
         UserDetails userDetails = (UserDetails) authentication.getPrincipal();
-        return generateTokenFromUsername(userDetails.getUsername());
+        return generateTokenFromUsername(userDetails.getUsername(),
+                userDetails.getAuthorities().stream()
+                        .map(a -> a.getAuthority())
+                        .toList());
     }
 
     /**
      * 从用户名生成 JWT Token
      */
-    public String generateTokenFromUsername(String username) {
+    public String generateTokenFromUsername(String username, java.util.Collection<String> roles) {
         Date now = new Date();
         Date expiryDate = new Date(now.getTime() + jwtExpirationMs);
 
@@ -44,6 +56,7 @@ public class JwtUtils {
 
         return Jwts.builder()
             .subject(username)
+            .claim("authorities", roles)
             .issuedAt(now)
             .expiration(expiryDate)
             .signWith(key, SignatureAlgorithm.HS512)
@@ -114,5 +127,42 @@ public class JwtUtils {
      */
     public long getExpirationTime() {
         return jwtExpirationMs;
+    }
+
+    /**
+     * 将 JWT Token 添加到黑名单
+     */
+    public void addTokenToBlacklist(String token) {
+        redisTemplate.opsForValue().set(token, "blacklist", jwtExpirationMs);
+    }
+
+    /**
+     * 检查 JWT Token 是否在黑名单中
+     */
+    public boolean isTokenInBlacklist(String token) {
+        return redisTemplate.hasKey(token);
+    }
+
+    public String refreshToken(String oldToken) {
+        if (isTokenInBlacklist(oldToken)) {
+            throw new JwtException("Token 已被注销");
+        }
+        String username = getUsernameFromToken(oldToken);
+        Map<String, Object> claims = getClaims(oldToken);
+        @SuppressWarnings("unchecked")
+        java.util.Collection<String> roles = (java.util.Collection<String>) claims.get("authorities");
+        if (roles == null) {
+            roles = java.util.Collections.emptyList();
+        }
+        return generateTokenFromUsername(username, roles);
+    }
+
+    public Map<String, Object> getClaims(String token) {
+        SecretKey key = Keys.hmacShaKeyFor(jwtSecret.getBytes());
+        return Jwts.parser()
+                .verifyWith(key)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
     }
 }

@@ -54,11 +54,17 @@ application-prod.yml
 docker-compose 里的服务名改成容器网络名
 例如 Spring 配置里 kafka.bootstrap-servers: kafka:9092，而不是 localhost
 
-- [ ]安全认证授权（Spring Security + JWT）
-- [ ]生产级数据库迁移管理（Flyway/Liquibase）
+- [ ]安全认证授权（Spring Security + JWT 完整接入业务接口，含 RBAC、@PreAuthorize）
+- [ ]生产级数据库迁移管理（Flyway / Liquibase 替代 ddl-auto=update）
 - [ ]真实的测试覆盖（Testcontainers、集成测试）
 - [ ]业务权限校验、用户模型、角色控制
 - [ ]细节上的容器/配置一致性
+- [ ] Metrics / 可观测性补齐（Counter、Timer、Grafana Dashboard、Trace/Log 关联）
+- [ ] 数据安全与合规（GDPR / PII 保护、用户数据删除接口、敏感数据加密）
+- [ ] 死信队列（DLQ）与重试策略完善（Kafka 重试、DLQ 监听、异常恢复）
+- [ ] JWT 黑名单与刷新机制完善（Token 注销、刷新后角色保留、Redis 过期策略）
+- [ ] 分布式追踪链路完整性（Kafka 消息头注入 traceId/spanId、异步任务跨边界传播）
+- [ ] 日志与监控管道生产化（Filebeat → Elasticsearch → Kibana、Prometheus、Grafana 仪表盘）
 
 # 项目完整分析报告
 ## 🎯 整体完成度：85% 🎉

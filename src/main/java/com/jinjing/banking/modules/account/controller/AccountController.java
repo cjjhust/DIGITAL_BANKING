@@ -15,9 +15,9 @@ import com.jinjing.banking.modules.account.dto.TransferRequest; // 确保导入�
 import com.jinjing.banking.modules.account.entity.Account;
 import com.jinjing.banking.modules.account.service.AccountService;
 import com.jinjing.banking.modules.transaction.entity.OutboxEvent;
-import com.jinjing.banking.modules.transaction.repository.OutboxEventRepository;
-import com.jinjing.banking.modules.transaction.repository.ProcessedTransactionRepository;
 import com.jinjing.banking.modules.transaction.entity.ProcessedTransaction;
+import com.jinjing.banking.modules.transaction.service.OutboxService;
+import com.jinjing.banking.modules.transaction.service.ProcessedTransactionService;
 import tools.jackson.databind.ObjectMapper;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.concurrent.atomic.AtomicLong;
@@ -31,15 +31,18 @@ import io.micrometer.tracing.BaggageInScope;
 import io.micrometer.tracing.Span;
 import java.time.Duration;
 import org.springframework.security.access.prepost.PreAuthorize;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 
+@Tag(name = "Account", description = "Account management APIs")
 @RestController
 @RequestMapping("/api/account")
 @RequiredArgsConstructor
 public class AccountController {
 
     private final AccountService accountService;
-    private final OutboxEventRepository outboxEventRepository;
-    private final ProcessedTransactionRepository processedTransactionRepository;
+    private final OutboxService outboxService;
+    private final ProcessedTransactionService processedTransactionService;
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
     private final Tracer tracer; // 注入 Micrometer Tracer
@@ -52,6 +55,7 @@ public class AccountController {
     private static final AtomicLong sequence = new AtomicLong(0);
     private static final long CUSTOM_EPOCH = 1704067200000L; // 2024-01-01
 
+    @Operation(summary = "Create account", description = "Register a new bank account")
     @PostMapping
     @PreAuthorize("hasAnyRole('USER','ADMIN')")
     public ResponseEntity<Account> createAccount(@Valid @RequestBody AccountCreateDTO request) {
@@ -96,6 +100,7 @@ public class AccountController {
                 .setIfAbsent(redisKey, "LOCKED", Duration.ofMinutes(1)); // 缩短为 1 分钟
         
         if (Boolean.FALSE.equals(isNew)) {
+            meterRegistry.counter("banking.redis.idempotency.hit.total").increment();
             // 只要进了这个判断，就说明触发了幂等拦截
             // 我们加上 "action" 标签，方便以后在仪表盘区分是转账还是开户被拦截了
             meterRegistry.counter("banking.requests.intercepted.total", 
@@ -104,14 +109,16 @@ public class AccountController {
             return ResponseEntity.accepted().body("Request processed or being processed (Cached)");
         }
 
+        meterRegistry.counter("banking.redis.idempotency.miss.total").increment();
+
         try {
             // 1. 检查 Outbox 表：利用客户端 RequestId 查重
-            if (outboxEventRepository.existsByClientRequestId(clientRequestId)) {
+            if (outboxService.existsByClientRequestId(clientRequestId)) {
                 return ResponseEntity.accepted().body("Request already being processed. ClientID: " + clientRequestId);
             }
 
             // 2. 检查已处理事务表：防止已经彻底完成的单子被重复提交
-            if (processedTransactionRepository.existsByClientRequestId(clientRequestId)) {
+            if (processedTransactionService.existsByClientRequestId(clientRequestId)) {
                 return ResponseEntity.accepted().body("Transfer already completed successfully. ID: " + clientRequestId);
             }
 
@@ -143,8 +150,8 @@ public class AccountController {
                         .topic("banking-transfers")
                         .payload(objectMapper.writeValueAsString(request))
                         .build();
-            
-                outboxEventRepository.save(event);
+
+                outboxService.save(event);
             }
 
             return ResponseEntity.accepted()

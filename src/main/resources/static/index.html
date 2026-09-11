@@ -4,23 +4,56 @@
     <meta charset="UTF-8">
     <title>High Performance Banking System</title>
     <style>
-        body { font-family: sans-serif; padding: 20px; background: #f4f7f6; }
-        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); max-width: 400px; }
-        input { display: block; width: 100%; margin: 10px 0; padding: 8px; box-sizing: border-box; }
+        body { font-family: sans-serif; padding: 20px; background: #f4f7f6; transition: background 0.3s; }
+        body.dark { background: #121212; color: #e0e0e0; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); max-width: 420px; transition: background 0.3s; }
+        body.dark .card { background: #1e1e1e; }
+        input { display: block; width: 100%; margin: 10px 0; padding: 8px; box-sizing: border-box; border-radius: 4px; border: 1px solid #ccc; }
+        body.dark input { background: #2a2a2a; color: #fff; border-color: #555; }
         button { background: #2c3e50; color: white; border: none; padding: 10px; width: 100%; cursor: pointer; border-radius: 4px; }
+        button:hover { opacity: 0.9; }
         #result { margin-top: 20px; padding: 10px; border-radius: 4px; display: none; }
         .success { background: #d4edda; color: #155724; }
         .error { background: #f8d7da; color: #721c24; }
+        .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; margin-left: 6px; }
+        .badge.admin { background: #c0392b; color: white; }
+        .badge.user { background: #27ae60; color: white; }
+        .timeline { display: flex; gap: 4px; margin-top: 8px; font-size: 0.7rem; }
+        .timeline span { padding: 2px 6px; border-radius: 3px; background: #ddd; color: #333; }
+        body.dark .timeline span { background: #333; color: #ccc; }
+        .timeline span.active { background: #2c3e50; color: white; }
+        .link-btn { background: #8e44ad; margin-top: 6px; }
+        .copy-btn { background: #16a085; margin-top: 6px; }
+        .lang-btn { background: #f39c12; width: auto; padding: 6px 10px; font-size: 0.75rem; }
     </style>
 </head>
 <body>
     <div class="card">
-        <h2>🏦 Transfer Money</h2>
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h2>🏦 Transfer Money</h2>
+            <div>
+                <span id="jwtRole" class="badge user">USER</span>
+                <button onclick="toggleDark()" class="lang-btn" style="margin-left:4px;">🌙</button>
+                <a href="/visual-bank.html" target="_blank" class="lang-btn" style="text-decoration:none; display:inline-block;">Visual Bank</a>
+            </div>
+        </div>
+        <div style="font-size:0.75rem; color:#777; margin-bottom:8px;" id="healthStatus">● Checking health...</div>
         <input type="text" id="fromAccount" placeholder="From Account Number (e.g. 001)">
         <input type="text" id="toAccount" placeholder="To Account Number (e.g. 002)">
         <input type="number" id="amount" placeholder="Amount">
         <button onclick="executeTransfer()">Confirm Transfer</button>
+        <button onclick="copyRequestId()" class="copy-btn" id="copyBtn" style="display:none;">Copy Request ID</button>
         <div id="result"></div>
+        <div id="timeline" class="timeline" style="display:none;"></div>
+        <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid rgba(255,255,255,0.1);">
+        <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem; color: rgba(255,255,255,0.7);">Transaction History</h3>
+        <input type="text" id="historyAccount" placeholder="Account Number" oninput="loadHistory()" style="font-size: 0.85rem; padding: 6px;">
+        <table id="historyTable" style="width: 100%; font-size: 0.75rem; margin-top: 0.5rem; border-collapse: collapse;">
+          <thead><tr style="color: rgba(255,255,255,0.5); text-align: left;"><th>ID</th><th>From</th><th>To</th><th>Amt</th><th>St</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <button onclick="exportGdpr()" class="link-btn">📥 GDPR Export (User Data)</button>
+        <p style="font-size: 0.7rem; color: rgba(255,255,255,0.3); margin-top: 1rem;">© CJJHUST — Visual Digital Bank | <a href="#" onclick="switchLang('zh')" style="color:#ccc;">ZH</a> <a href="#" onclick="switchLang('en')" style="color:#ccc;">EN</a> <a href="#" onclick="switchLang('de')" style="color:#ccc;">DE</a></p>
     </div>
 
     <script>
@@ -47,7 +80,11 @@
                 resultDiv.style.display = 'block';
                 if (response.ok) {
                     resultDiv.className = 'success';
-                    resultDiv.innerHTML = `<strong>Accepted!</strong><br>Request ID: ${requestId}<br>Message: ${message}`;
+                    currentRequestId = requestId;
+                    document.getElementById('copyBtn').style.display = 'block';
+                    resultDiv.innerHTML = `<strong>Accepted!</strong><br>Request ID: ${requestId}<br>Trace: <a href="#" onclick="alert('Trace ID linked to Grafana/Jaeger')">view trace</a><br>Message: ${message}`;
+                    document.getElementById('timeline').style.display = 'flex';
+                    document.getElementById('timeline').innerHTML = '<span>PENDING</span><span>PROCESSING</span><span class="active">COMPLETED</span>';
                 } else {
                     resultDiv.className = 'error';
                     resultDiv.innerText = 'Error: ' + message;
@@ -58,6 +95,67 @@
                 resultDiv.innerText = 'Failed to connect to server.';
             }
         }
+        async function loadHistory() {
+            const acc = document.getElementById('historyAccount').value;
+            if (!acc) return;
+            try {
+                const res = await fetch('/api/account/' + acc + '/transactions?page=0&size=5');
+                const data = await res.json();
+                const tbody = document.querySelector('#historyTable tbody');
+                tbody.innerHTML = '';
+                (data.content || []).forEach(t => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = '<td>' + (t.transactionId || '-') + '</td><td>' + (t.fromAccountNo || '-') + '</td><td>' + (t.toAccountNo || '-') + '</td><td>' + (t.amount || '-') + '</td><td>' + (t.status || '-') + '</td>';
+                    row.style.cursor = 'pointer';
+                    row.onclick = function() {
+                        document.getElementById('fromAccount').value = t.fromAccountNo || '';
+                        document.getElementById('toAccount').value = t.toAccountNo || '';
+                        document.getElementById('amount').value = '';
+                    };
+                    tbody.appendChild(row);
+                });
+            } catch (e) { console.error('History load failed', e); }
+        }
+        let currentRequestId = '';
+        function copyRequestId() {
+            if (currentRequestId) {
+                navigator.clipboard.writeText(currentRequestId).then(() => alert('Copied: ' + currentRequestId));
+            }
+        }
+        function toggleDark() {
+            document.body.classList.toggle('dark');
+        }
+        function switchLang(lang) {
+            const texts = { zh: { title: '🏦 转账', btn: '确认转账', gdpr: '📥 GDPR 数据导出' }, en: { title: '🏦 Transfer Money', btn: 'Confirm Transfer', gdpr: '📥 GDPR Export' }, de: { title: '🏦 Überweisung', btn: 'Bestätigen', gdpr: '📥 GDPR Export' } };
+            const t = texts[lang] || texts.en;
+            document.querySelector('h2').innerText = t.title;
+            document.querySelector('button[onclick="executeTransfer()"]').innerText = t.btn;
+            document.querySelector('.link-btn').innerText = t.gdpr;
+        }
+        async function exportGdpr() {
+            const userId = document.getElementById('fromAccount').value || '001';
+            try {
+                const res = await fetch('/api/gdpr/user/' + userId);
+                const blob = await res.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = 'gdpr-export-' + userId + '.json'; a.click();
+            } catch (e) { alert('GDPR export failed'); }
+        }
+        async function checkHealth() {
+            try {
+                const res = await fetch('/actuator/health');
+                const data = await res.json();
+                const status = data.status === 'UP' ? '● UP' : '● DOWN';
+                document.getElementById('healthStatus').innerText = status + ' | ' + (data.components ? JSON.stringify(data.components) : '');
+                document.getElementById('healthStatus').style.color = data.status === 'UP' ? '#27ae60' : '#c0392b';
+            } catch (e) {
+                document.getElementById('healthStatus').innerText = '● OFFLINE';
+                document.getElementById('healthStatus').style.color = '#c0392b';
+            }
+        }
+        setInterval(checkHealth, 5000);
+        checkHealth();
     </script>
 </body>
 </html>

@@ -18,6 +18,9 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.Collection;
+import java.util.stream.Collectors;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 
 /**
  * JWT 认证过滤器
@@ -43,10 +46,28 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 String username = jwtUtils.getUsernameFromToken(token);
                 UserDetails userDetails = userDetailsService.loadUserByUsername(username);
 
+                // 解析 JWT 中的 authorities claim（角色）
+                Collection<SimpleGrantedAuthority> authorities = java.util.Collections.emptyList();
+                try {
+                    java.util.Map<String, Object> claims = jwtUtils.getClaims(token);
+                    Object authClaim = claims.get("authorities");
+                    if (authClaim instanceof java.util.Collection) {
+                        authorities = ((java.util.Collection<?>) authClaim).stream()
+                                .map(Object::toString)
+                                .map(SimpleGrantedAuthority::new)
+                                .collect(Collectors.toList());
+                    }
+                } catch (Exception ex) {
+                    log.warn("无法从 Token 解析 authorities，使用 UserDetails 默认权限");
+                    authorities = userDetails.getAuthorities().stream()
+                            .map(a -> new SimpleGrantedAuthority(a.getAuthority()))
+                            .collect(Collectors.toList());
+                }
+
                 // 创建认证 token
                 UsernamePasswordAuthenticationToken authentication =
                     new UsernamePasswordAuthenticationToken(
-                        userDetails, null, userDetails.getAuthorities());
+                        userDetails, null, authorities);
 
                 // 设置请求详情（用于日志和审计）
                 authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));

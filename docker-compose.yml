@@ -47,6 +47,8 @@ services:
       - .env
     environment:
       - BANKING_SNOWFLAKE_WORKER_ID=1
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - SPRING_REDIS_HOST=cache
     depends_on:
       - db
       - cache
@@ -80,7 +82,8 @@ services:
       - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
       - KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka:9093
       - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
-      - KAFKA_HEAP_OPTS=-Xmx1G -Xms1G  # 增加堆内存
+      - KAFKA_HEAP_OPTS=-Xmx512m -Xms512m
+      # 增加堆内存
     deploy:
       resources:
         limits:
@@ -193,9 +196,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
-        reservations:
           memory: 1G
+        reservations:
+          memory: 0.5G
     networks:
       - backend
 

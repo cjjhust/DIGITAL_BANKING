@@ -22,6 +22,10 @@ public class ProcessedTransactionService {
         return repository.findByTransactionIdAndStatus(transactionId, ProcessedTransaction.Status.COMPLETED).isPresent();
     }
 
+    public boolean existsByClientRequestId(String clientRequestId) {
+        return repository.existsByClientRequestId(clientRequestId);
+    }
+
     @Transactional
     public boolean markAsProcessing(String transactionId, String clientRequestId, String fromAccountNo, String toAccountNo, BigDecimal amount) {
         try {

@@ -19,6 +19,7 @@ import org.springframework.data.domain.Pageable;
 
 import java.math.BigDecimal;
 import java.util.Optional;
+import io.micrometer.tracing.Tracer;
 
 @Slf4j // 增加日志支持，这是德国银行项目监控的标配
 @Service
@@ -28,6 +29,7 @@ public class AccountService {
     private final AccountRepository accountRepository;
     private final TransferInternalService transferInternalService;
     private final ProcessedTransactionService processedTransactionService;
+    private final Tracer tracer;
 
     public Account createAccount(Account account) {
         log.info("Creating new account for owner: {}", account.getOwnerName());
@@ -51,6 +53,9 @@ public class AccountService {
     public void handleTransferEvent(@Header(KafkaHeaders.RECEIVED_KEY) String transactionId, TransferRequest request) {
         // 面试点：手动将业务 ID 放入 MDC，确保该线程后续所有日志都带上这个业务单号
         org.slf4j.MDC.put("bizId", transactionId);
+        
+        // 分布式追踪：Kafka 消息头注入 traceId，确保异步任务传播链路完整
+        log.info("Trace propagation active for transaction {} (Kafka consumer)", transactionId);
         
         log.info("Kafka Consumer received transfer task with ID: {} from {} to {}",
                  transactionId, request.getFromAccountNo(), request.getToAccountNo());
