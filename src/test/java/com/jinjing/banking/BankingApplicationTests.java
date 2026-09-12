@@ -15,47 +15,33 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
-import java.util.HashMap;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationContext;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
+
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.fail; // Added for test failure
+import static org.assertj.core.api.Assertions.fail;
 
-@SpringBootTest // 加载整个 Spring Boot 应用上下文
-@Testcontainers
+@SpringBootTest
 public class BankingApplicationTests {
-
-    @Container
-    @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
-
-    @Container
-    @ServiceConnection
-    static KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:latest"));
-
-    @Container
-    @ServiceConnection
-    static GenericContainer<?> redis = new GenericContainer<>(DockerImageName.parse("redis:7-alpine")).withExposedPorts(6379);
-
-    @Container
-    @ServiceConnection
-    static ClickHouseContainer clickhouse = new ClickHouseContainer("clickhouse/clickhouse-server:latest");
-
 
     @Autowired
     private ApplicationContext context;
 
     @Autowired
-    private KafkaTemplate<String, String> kafkaTemplate; // 注入真实的 KafkaTemplate
+    private KafkaTemplate<String, String> kafkaTemplate;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
-	@Test
-	void contextLoads() {
+    @Test
+    void contextLoads() {
         assertThat(context).isNotNull();
         assertThat(kafkaTemplate).isNotNull();
-	}
+    }
 
     @Test
     void testClickhouseConnection() {
@@ -69,5 +55,4 @@ public class BankingApplicationTests {
             fail("ClickHouse connection or query failed");
         }
     }
-
 }

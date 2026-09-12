@@ -2,6 +2,11 @@ spring:
   application:
     name: banking
 
+  # 启用 Java 21 虚拟线程
+  threads:
+    virtual:
+      enabled: true
+
   # Flyway 迁移配置
   flyway:
     enabled: true
@@ -62,6 +67,20 @@ management:
     enabled: true
     sampling:
       probability: 1.0
+    export:
+      zipkin:
+        endpoint: ${MANAGEMENT_ZIPKIN_TRACING_ENDPOINT:http://zipkin:9411/api/v2/spans}
+  zipkin:
+    tracing:
+      endpoint: ${MANAGEMENT_ZIPKIN_TRACING_ENDPOINT:http://zipkin:9411/api/v2/spans}
+  otlp:
+    tracing:
+      endpoint: ${MANAGEMENT_OTLP_TRACING_ENDPOINT:http://otel-collector:4318/v1/traces}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${MANAGEMENT_OTLP_TRACING_ENDPOINT:http://otel-collector:4318/v1/traces}
   metrics:
     tags:
       application: ${spring.application.name}

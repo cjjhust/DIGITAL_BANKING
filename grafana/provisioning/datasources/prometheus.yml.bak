@@ -1,0 +1,36 @@
+global:
+  scrape_interval: 15s # 默认每 15 秒抓取一次数据
+  evaluation_interval: 15s # 每 15 秒评估一次报警规则
+
+# [注意]：apiVersion 和 datasources 是 Grafana 的配置，不应出现在 Prometheus 配置文件中。
+# apiVersion: 1
+
+# 抓取配置
+scrape_configs:
+  # 任务 1：Prometheus 监控它自己
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # 任务 2：监控你的 Spring Boot 银行应用
+  - job_name: "banking-service"
+    metrics_path: "/actuator/prometheus" # 抓取的接口路径
+    static_configs:
+      # [旧方案]：使用 host.docker.internal 连接宿主机端口。
+      # 缺点：依赖宿主机网络环境，不符合容器化隔离原则。
+      # - targets: ["host.docker.internal:8080"] 
+      # [新方案]：直接使用 Docker Compose 定义的服务名 'app'。
+      - targets: ["app:8080"] 
+    # 也可以加上标签，方便在 Grafana 里分类
+    relabel_configs:
+      - replacement: "production"
+        target_label: "env"
+
+# [历史记录]：以下是原本误放在此处的 Grafana 数据源配置，已注释以防止 Prometheus 报错
+# datasources:
+#   - name: Prometheus
+#     type: prometheus
+#     access: proxy
+#     url: http://prometheus:9090
+#     isDefault: true
+#     editable: true

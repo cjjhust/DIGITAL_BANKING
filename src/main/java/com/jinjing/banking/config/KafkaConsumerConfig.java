@@ -4,7 +4,6 @@ import com.jinjing.banking.modules.account.dto.TransferRequest;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
-import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -33,7 +32,7 @@ public class KafkaConsumerConfig {
     private String bootstrapServers;
 
     @Bean
-    public ConsumerFactory<Object, Object> consumerFactory() {
+    public ConsumerFactory<String, TransferRequest> consumerFactory() {
         Map<String, Object> props = new HashMap<>();
         props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(ConsumerConfig.GROUP_ID_CONFIG, "banking-group");
@@ -44,11 +43,10 @@ public class KafkaConsumerConfig {
         // 如果单笔交易处理极慢（比如涉及外部风控接口），需要调大这个时间，防止 Kafka 认为消费者挂了
         props.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, 300000); // 5分钟
 
-        // 性能巅峰：使用 ByteArrayDeserializer 拿原始字节
+        // Producer 和 DLT 都使用 StringSerializer，这里必须保持类型一致。
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class);
+        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
 
-        // 使用 Object 泛型，解决与 ListenerContainerFactory 的类型匹配冲突
         return new DefaultKafkaConsumerFactory<>(props);
     }
 
@@ -68,7 +66,7 @@ public class KafkaConsumerConfig {
 
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, TransferRequest> kafkaListenerContainerFactory(
-            ConsumerFactory<Object, Object> consumerFactory,
+            ConsumerFactory<String, TransferRequest> consumerFactory,
             KafkaTemplate<String, String> kafkaTemplate) {
         ConcurrentKafkaListenerContainerFactory<String, TransferRequest> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();

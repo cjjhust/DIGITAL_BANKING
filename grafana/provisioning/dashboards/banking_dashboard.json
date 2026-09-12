@@ -49,6 +49,59 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "title": "Successful Transfers",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "thresholds" } }
+      },
+      "targets": [
+        { "expr": "sum(transfer_success_total)", "refId": "A" }
+      ]
+    },
+    {
+      "title": "Failed Transfers",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "thresholds" } }
+      },
+      "targets": [
+        { "expr": "sum(transfer_failure_total)", "refId": "A" }
+      ]
+    },
+    {
+      "title": "Transfer Throughput",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "fillOpacity": 10 } }
+      },
+      "targets": [
+        { "expr": "rate(transfer_success_total[1m])", "legendFormat": "success/s", "refId": "A" },
+        { "expr": "rate(transfer_failure_total[1m])", "legendFormat": "failure/s", "refId": "B" }
+      ]
+    },
+    {
+      "title": "Transfer Processing Latency",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 10 } }
+      },
+      "targets": [
+        {
+          "expr": "rate(transfer_duration_seconds_sum[1m]) / rate(transfer_duration_seconds_count[1m])",
+          "legendFormat": "average latency",
+          "refId": "A"
+        }
+      ]
     }
   ],
   "refresh": "5s",

@@ -49,10 +49,17 @@ services:
       - BANKING_SNOWFLAKE_WORKER_ID=1
       - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - SPRING_REDIS_HOST=cache
+      - MANAGEMENT_ZIPKIN_TRACING_ENDPOINT=http://zipkin:9411/api/v2/spans
+      - MANAGEMENT_OTLP_TRACING_ENDPOINT=http://otel-collector:4318/v1/traces
+      - OTEL_SERVICE_NAME=banking
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
     depends_on:
       - db
       - cache
       - kafka
+      - zipkin
+      - otel-collector
       - elasticsearch
     ports:
       - "8080:8080"
@@ -82,6 +89,9 @@ services:
       - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
       - KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka:9093
       - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
       - KAFKA_HEAP_OPTS=-Xmx512m -Xms512m
       # 增加堆内存
     deploy:
@@ -90,6 +100,25 @@ services:
           memory: 1G
         reservations:
           memory: 512M
+    networks:
+      - backend
+
+  zipkin:
+    image: openzipkin/zipkin:latest
+    container_name: banking-zipkin
+    ports:
+      - "9411:9411"
+    networks:
+      - backend
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: banking-otel-collector
+    command: ["--config=/etc/otelcol-contrib/config.yml"]
+    volumes:
+      - ./otel-collector-config.yml:/etc/otelcol-contrib/config.yml:ro
+    depends_on:
+      - zipkin
     networks:
       - backend
 
@@ -192,7 +221,7 @@ services:
       - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
       - CLICKHOUSE_PASSWORD=secret
     volumes:
-      - ./clickhouse-init:/docker-entrypoint-initdb.d
+      - ./clickhouse-init:/docker-entrypoint-initdb.d:ro
     deploy:
       resources:
         limits:

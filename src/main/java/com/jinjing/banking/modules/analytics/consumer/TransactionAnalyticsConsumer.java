@@ -55,7 +55,7 @@ public class TransactionAnalyticsConsumer {
                     TransferRequest request = objectMapper.readValue(message, TransferRequest.class);
                     LocalDateTime createdAt = LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.systemDefault());
 
-                    clickHouseJdbcTemplate.update(INSERT_AUDIT_SQL, Map.of(
+                    int inserted = clickHouseJdbcTemplate.update(INSERT_AUDIT_SQL, Map.of(
                         "tid", transactionId,
                         "cid", request.getRequestId(),
                         "from", request.getFromAccountNo(),
@@ -65,6 +65,7 @@ public class TransactionAnalyticsConsumer {
                         "span", getSpanId(),
                         "ts", createdAt
                     ));
+                    log.info("ClickHouse audit persisted for transaction {} (rows={})", transactionId, inserted);
                 } catch (JacksonException e) {
                     log.error("Invalid message format for transaction: {}", transactionId, e);
                 } catch (Exception e) {

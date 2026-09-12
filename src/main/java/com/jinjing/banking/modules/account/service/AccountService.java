@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.kafka.annotation.KafkaListener; // 保持不变
 import org.springframework.kafka.support.KafkaHeaders;
 import com.jinjing.banking.modules.account.dto.TransferRequest; // Import the new DTO
@@ -50,6 +51,7 @@ public class AccountService {
      * 面试谈资：如果 Kafka 挂了怎么办？消息会堆积，但不会丢失。等 Service 重启后会自动继续处理。
      */
     @KafkaListener(topics = "banking-transfers", groupId = "banking-group")
+    @Transactional
     public void handleTransferEvent(@Header(KafkaHeaders.RECEIVED_KEY) String transactionId, TransferRequest request) {
         // 面试点：手动将业务 ID 放入 MDC，确保该线程后续所有日志都带上这个业务单号
         org.slf4j.MDC.put("bizId", transactionId);

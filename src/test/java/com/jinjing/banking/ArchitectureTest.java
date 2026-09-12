@@ -25,7 +25,7 @@ class ArchitectureTest {
         ArchRule rule = classes()
                 .that().resideInAPackage("..service..")
                 .should().onlyBeAccessed().byClassesThat().resideInAnyPackage(
-                        "..controller..", "..service..", "..config.."
+                    "..controller..", "..service..", "..config..", "..dlq..", "..analytics.."
                 );
         rule.check(importedClasses);
     }

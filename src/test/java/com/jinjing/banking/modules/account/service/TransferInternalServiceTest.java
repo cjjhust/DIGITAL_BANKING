@@ -3,9 +3,10 @@ package com.jinjing.banking.modules.account.service;
 import com.jinjing.banking.common.exception.BusinessException;
 import com.jinjing.banking.modules.account.entity.Account;
 import com.jinjing.banking.modules.account.repository.AccountRepository;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -21,8 +22,12 @@ class TransferInternalServiceTest {
     @Mock
     private AccountRepository accountRepository;
 
-    @InjectMocks
     private TransferInternalService transferInternalService;
+
+    @BeforeEach
+    void setUp() {
+        transferInternalService = new TransferInternalService(accountRepository, new SimpleMeterRegistry());
+    }
 
     @Test
     void executeTransfer_shouldUpdateBalances() {

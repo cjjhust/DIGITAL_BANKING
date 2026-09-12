@@ -17,7 +17,7 @@ public interface OutboxEventRepository extends JpaRepository<OutboxEvent, Long> 
      * 业内真正的高并发分发方案：FOR UPDATE SKIP LOCKED
      * 确保多个后端实例同时轮询时，能够自动跳过已被锁定的行，实现无损、无锁冲突的并发抓取。
      */
-    @Query(value = "SELECT * FROM outbox_event ORDER BY id ASC FOR UPDATE SKIP LOCKED", 
+    @Query(value = "SELECT * FROM outbox_events ORDER BY id ASC FOR UPDATE SKIP LOCKED", 
            nativeQuery = true)
     List<OutboxEvent> fetchPendingEvents(Pageable pageable);
 }

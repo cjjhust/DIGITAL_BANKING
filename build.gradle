@@ -77,4 +77,19 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	filter {
+		excludeTestsMatching 'com.jinjing.banking.BankingApplicationTests'
+		excludeTestsMatching 'com.jinjing.banking.BankingIntegrationTest'
+		excludeTestsMatching 'com.jinjing.banking.TransferIntegrationTest'
+	}
+}
+
+
+tasks.register('dockerTest', Test) {
+	description = 'Runs Docker-backed integration tests that require Testcontainers.'
+	group = 'verification'
+	useJUnitPlatform()
+	include 'com/jinjing/banking/BankingApplicationTests.class'
+	include 'com/jinjing/banking/BankingIntegrationTest.class'
+	include 'com/jinjing/banking/TransferIntegrationTest.class'
 }

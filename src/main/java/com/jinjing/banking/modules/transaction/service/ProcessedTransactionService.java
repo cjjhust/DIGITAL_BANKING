@@ -1,11 +1,12 @@
 package com.jinjing.banking.modules.transaction.service;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
 import com.jinjing.banking.modules.transaction.entity.ProcessedTransaction;
 import com.jinjing.banking.modules.transaction.repository.ProcessedTransactionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -28,21 +29,12 @@ public class ProcessedTransactionService {
 
     @Transactional
     public boolean markAsProcessing(String transactionId, String clientRequestId, String fromAccountNo, String toAccountNo, BigDecimal amount) {
-        try {
-            ProcessedTransaction pt = ProcessedTransaction.builder()
-                    .transactionId(transactionId)
-                    .clientRequestId(clientRequestId)
-                    .status(ProcessedTransaction.Status.PENDING)
-                    .fromAccountNo(fromAccountNo)
-                    .toAccountNo(toAccountNo)
-                    .amount(amount) // 新增：保存金额
-                    .build();
-            repository.saveAndFlush(pt);
-            return true;
-        } catch (DataIntegrityViolationException e) {
-            log.warn("Transaction ID {} is already being processed.", transactionId);
-            return false;
+        boolean inserted = repository.insertPendingIfAbsent(
+                transactionId, clientRequestId, fromAccountNo, toAccountNo, amount) == 1;
+        if (!inserted) {
+            log.warn("Transaction {} is already being processed or has a final state.", transactionId);
         }
+        return inserted;
     }
 
     @Transactional
@@ -68,5 +60,9 @@ public class ProcessedTransactionService {
 
     public Optional<ProcessedTransaction> getTransactionById(String transactionId) {
         return repository.findByTransactionId(transactionId);
+    }
+
+    public List<ProcessedTransaction> getPendingTransactionsOlderThan(LocalDateTime dateTime) {
+        return repository.findByStatusAndCreatedAtBefore(ProcessedTransaction.Status.PENDING, dateTime);
     }
 }
