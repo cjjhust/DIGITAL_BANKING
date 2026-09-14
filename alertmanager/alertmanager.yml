@@ -1,0 +1,127 @@
+# Alertmanager 配置（2026-09-14 新增）
+#
+# 职责分工：
+#   Prometheus  = 判定「什么算异常」（见 prometheus/banking-alerts.yml，10 条规则）
+#   Alertmanager = 决定「异常了通知谁、怎么通知、多久通知一次」
+#
+# 本配置的两大目标：
+#   ① 不让噪音淹没有效信息（分组 + 抑制）
+#   ② 让通知内容可执行（severity 分级 + 模板里带 action）
+
+global:
+  resolve_timeout: 5m
+
+  # ── 邮件发送（当前指向本地 Mailpit，零凭据）──────────────────────────
+  # 换生产环境只需改这三行：
+  #   smtp_smarthost: 'smtp.gmail.com:587'      （Gmail）
+  #   smtp_auth_username / smtp_auth_password    ← 从环境变量注入，不写进文件
+  #   smtp_require_tls: true
+  smtp_smarthost: 'mailpit:1025'
+  smtp_from: 'alertmanager@banking.local'
+  smtp_require_tls: false
+
+templates:
+  - /etc/alertmanager/templates/*.tmpl
+
+# ── 路由：先分级，再决定给谁 ─────────────────────────────────────────
+route:
+  # 默认收件人（没有匹配到任何子路由时）
+  receiver: banking-warning
+
+  # group_by 决定「哪些告警会被合并成一封邮件」。
+  # 按 alertname + layer 分组的效果：
+  #   应用挂掉会同时触发 BankingTargetDown + 4 个 KafkaConsumerGroupEmpty，
+  #   但它们的 alertname 不同 → 会分开成两封，各自把同类实例合并。
+  group_by: ['alertname', 'layer']
+
+  # 新告警产生后先等 10 秒再发，把这一批一起打包（避免「唰唰唰」发 5 封）
+  group_wait: 10s
+  # 同一组内出现新告警时，最多 2 分钟合并一次再发
+  group_interval: 2m
+  # 同一告警在未恢复前，最多每 4 小时重复提醒一次（太频繁会被无视）
+  repeat_interval: 4h
+
+  routes:
+    # critical：业务不转了 / 管道断了 / 采集不到 —— 这些要立刻看到
+    - matchers:
+        - severity = critical
+      receiver: banking-critical
+      group_wait: 5s
+      repeat_interval: 1h
+      continue: false    # warning：还没断但需要关注 —— 1 小时提醒一次就够
+    - matchers:
+        - severity = warning
+      receiver: banking-warning
+      repeat_interval: 6h
+
+# ── 抑制规则：一次故障不该刷出一屏告警 ───────────────────────────────
+# 这是 Alertmanager 最有价值的功能。没有它，停掉应用会同时收到
+# 「目标失联 + 消费者组为空 + 无成交 + 延迟异常」等一堆告警，
+# 而真正有用的信息只有第一条。
+inhibit_rules:
+  # ① 采集层挂了 → 抑制所有下游推断出来的告警
+  #    （up==0 时业务指标根本没有样本，这些告警本身就是误报）
+  - source_matchers:
+      - alertname = BankingTargetDown
+    target_matchers:
+      - layer =~ "pipeline|business|resource"
+    equal: []
+
+  # ② 账本消费者组空了 → 抑制它的积压告警
+  #    （消费者都不在了，「积压」是必然结果，不是独立事件）
+  - source_matchers:
+      - alertname = KafkaConsumerGroupEmpty
+      - consumergroup = banking-group
+    target_matchers:
+      - alertname = KafkaConsumerLagSustained
+    equal: ['consumergroup']
+
+  # ③ 数据库连接池排队 → 抑制延迟告警
+  #    （延迟高多半就是被连接池拖的，报一条根因就够了）
+  - source_matchers:
+      - alertname = DbConnectionPoolSaturated
+    target_matchers:
+      - alertname = TransferLatencyHigh
+    equal: []
+
+# ── 收件人 ──────────────────────────────────────────────────────────
+receivers:
+  - name: banking-critical
+    # 一个 receiver 可以挂多种通知方式 —— critical 同时走邮件 + 手机推送
+    email_configs:
+      - to: 'oncall@banking.local'
+        send_resolved: true          # 恢复时也发一封，否则不知道啥时候好的
+        headers:
+          # 主题里必须体现「这是新告警还是恢复」—— 否则收件箱里两封邮件长得一模一样，
+          # 值班的人无法一眼分辨。（2026-09-14 实测发现的缺陷，已修）
+          Subject: '[{{ .CommonLabels.severity }}] {{ if eq .Status "resolved" }}✅ RESOLVED — {{ end }}{{ .GroupLabels.alertname }} — {{ .CommonAnnotations.summary }}'
+        html: '{{ template "banking.email.html" . }}'
+    webhook_configs:
+      # 转发器会把这个 JSON 翻译成手机能看的推送（服务见 alertrelay/relay.py）
+      - url: 'http://alert-relay:8080/alert'
+        send_resolved: true
+
+  - name: banking-warning
+    email_configs:
+      - to: 'team@banking.local'
+        send_resolved: true
+        headers:
+          Subject: '[{{ .CommonLabels.severity }}] {{ if eq .Status "resolved" }}✅ RESOLVED — {{ end }}{{ .GroupLabels.alertname }} — {{ .CommonAnnotations.summary }}'
+        html: '{{ template "banking.email.html" . }}'
+    webhook_configs:
+      - url: 'http://alert-relay:8080/alert'
+        send_resolved: true
+
+  # ── 下面这些留作备用，取消注释即可启用（都需要你自备凭据，不要提交进 git）──
+  #
+  # Slack：在 Slack 里创建 Incoming Webhook，把 URL 放进 ALERTMANAGER_SLACK_WEBHOOK
+  # - name: banking-slack
+  #   slack_configs:
+  #     - api_url_file: /etc/alertmanager/secrets/slack_webhook
+  #       channel: '#banking-alerts'
+  #       title: '{{ .CommonAnnotations.summary }}'
+  #       text: '{{ .CommonAnnotations.description }}'
+  #
+  # 手机推送（ntfy）：已启用，topic 从 .env 的 NTFY_TOPIC 读（见 alertrelay/）
+  # 若想自己写中间服务，把上面 webhook_configs 的 url 改掉即可。
+  # 注意：不要把 webhook 直接指向 ntfy.sh —— Alertmanager 推的是原始 JSON，手机上没法看。

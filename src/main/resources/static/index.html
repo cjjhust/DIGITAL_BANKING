@@ -38,6 +38,15 @@
             </div>
         </div>
         <div style="font-size:0.75rem; color:#777; margin-bottom:8px;" id="healthStatus">● Checking health...</div>
+        <div id="authPanel" style="border:1px dashed #ccc; border-radius:6px; padding:8px; margin-bottom:10px;">
+            <div style="font-size:0.75rem; color:#777; margin-bottom:4px;" id="authStatus">Not logged in</div>
+            <input type="text" id="loginUser" placeholder="Username" autocomplete="username" style="margin:6px 0;">
+            <input type="password" id="loginPass" placeholder="Password" autocomplete="current-password" style="margin:6px 0;">
+            <div style="display:flex; gap:6px;">
+                <button onclick="login()">Login</button>
+                <button onclick="logout()" style="background:#c0392b;">Logout</button>
+            </div>
+        </div>
         <input type="text" id="fromAccount" placeholder="From Account Number (e.g. 001)">
         <input type="text" id="toAccount" placeholder="To Account Number (e.g. 002)">
         <input type="number" id="amount" placeholder="Amount">
@@ -52,27 +61,132 @@
           <thead><tr style="color: rgba(255,255,255,0.5); text-align: left;"><th>ID</th><th>From</th><th>To</th><th>Amt</th><th>St</th></tr></thead>
           <tbody></tbody>
         </table>
+        <input type="number" id="gdprUserId" placeholder="User ID (for GDPR export/delete)" style="font-size: 0.85rem; padding: 6px;">
         <button onclick="exportGdpr()" class="link-btn">📥 GDPR Export (User Data)</button>
+        <button onclick="deleteGdpr()" class="link-btn" style="background:#c0392b;">🗑 GDPR Delete (Anonymize)</button>
         <p style="font-size: 0.7rem; color: rgba(255,255,255,0.3); margin-top: 1rem;">© CJJHUST — Visual Digital Bank | <a href="#" onclick="switchLang('zh')" style="color:#ccc;">ZH</a> <a href="#" onclick="switchLang('en')" style="color:#ccc;">EN</a> <a href="#" onclick="switchLang('de')" style="color:#ccc;">DE</a></p>
     </div>
 
     <script>
+        const TOKEN_KEY = 'banking.jwt';
+        let currentUser = null;
+
+        // ---------- 认证：所有受保护接口都需要 Authorization: Bearer <token> ----------
+        function getToken() { return localStorage.getItem(TOKEN_KEY); }
+
+        function authHeaders(extra) {
+            const headers = Object.assign({}, extra || {});
+            const token = getToken();
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+            return headers;
+        }
+
+        function jsonHeaders() { return authHeaders({ 'Content-Type': 'application/json' }); }
+
+        function setAuthStatus(text) { document.getElementById('authStatus').innerText = text; }
+
+        async function login() {
+            const username = document.getElementById('loginUser').value.trim();
+            const password = document.getElementById('loginPass').value;
+            if (!username || !password) { alert('Username and password are required'); return; }
+            try {
+                const res = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: username, password: password })
+                });
+                const data = await res.json().catch(function () { return {}; });
+                if (!res.ok) {
+                    setAuthStatus('Login failed (' + res.status + '): ' + (data.message || 'check credentials'));
+                    return;
+                }
+                localStorage.setItem(TOKEN_KEY, data.token);
+                document.getElementById('loginPass').value = '';
+                await loadCurrentUser();
+            } catch (e) {
+                setAuthStatus('Login failed: network error');
+            }
+        }
+
+        function logout() {
+            localStorage.removeItem(TOKEN_KEY);
+            currentUser = null;
+            const badge = document.getElementById('jwtRole');
+            badge.className = 'badge user';
+            badge.innerText = 'GUEST';
+            setAuthStatus('Not logged in');
+            document.getElementById('gdprUserId').value = '';
+        }
+
+        async function loadCurrentUser() {
+            if (!getToken()) { logout(); return; }
+            try {
+                const res = await fetch('/api/auth/me', { headers: authHeaders() });
+                if (!res.ok) { logout(); setAuthStatus('Session expired, please login again'); return; }
+                currentUser = await res.json();
+                const isAdmin = String(currentUser.role || '').indexOf('ADMIN') >= 0;
+                const badge = document.getElementById('jwtRole');
+                badge.className = 'badge ' + (isAdmin ? 'admin' : 'user');
+                badge.innerText = currentUser.role || 'USER';
+                document.getElementById('loginUser').value = currentUser.username || '';
+                document.getElementById('gdprUserId').value = currentUser.id || '';
+                setAuthStatus('Logged in as ' + currentUser.username + ' (userId=' + currentUser.id + ')');
+            } catch (e) {
+                setAuthStatus('Unable to load current user');
+            }
+        }
+
+        // ---------- 受理结果轮询：QUEUED -> PENDING -> COMPLETED / FAILED ----------
+        const STATUS_STEPS = ['QUEUED', 'PROCESSING', 'PENDING', 'COMPLETED'];
+
+        function renderTimeline(status) {
+            const timeline = document.getElementById('timeline');
+            timeline.style.display = 'flex';
+            const current = STATUS_STEPS.indexOf(status);
+            timeline.innerHTML = STATUS_STEPS.map(function (step, index) {
+                return '<span class="' + (current >= index ? 'active' : '') + '">' + step + '</span>';
+            }).join('') + (status === 'FAILED' ? '<span class="active" style="background:#c0392b;">FAILED</span>' : '');
+        }
+
+        async function pollTransferStatus(requestId, attempt) {
+            attempt = attempt || 0;
+            try {
+                const res = await fetch('/api/account/transfer/' + encodeURIComponent(requestId), { headers: authHeaders() });
+                if (res.ok) {
+                    const data = await res.json();
+                    renderTimeline(data.status);
+                    const reason = data.errorMessage ? '<br>Reason: ' + data.errorMessage : '';
+                    document.getElementById('result').innerHTML =
+                        '<strong>' + data.status + '</strong><br>Transaction: ' + (data.transactionId || '-') + reason;
+                    if (data.status === 'COMPLETED' || data.status === 'FAILED') return;
+                }
+            } catch (e) {
+                // 网络抖动：继续重试
+            }
+            if (attempt < 12) setTimeout(function () { pollTransferStatus(requestId, attempt + 1); }, 800);
+        }
+
         async function executeTransfer() {
             const resultDiv = document.getElementById('result');
+            if (!getToken()) {
+                alert('Please login first: the transfer API requires a Bearer token.');
+                return;
+            }
             // 生成 UUID 作为幂等性 Key
             const requestId = crypto.randomUUID();
             
             const payload = {
                 requestId: requestId,
-                fromAccountNumber: document.getElementById('fromAccount').value,
-                toAccountNumber: document.getElementById('toAccount').value,
-                amount: document.getElementById('amount').value
+                // 字段名必须与 TransferRequest DTO 一致：fromAccountNo / toAccountNo
+                fromAccountNo: document.getElementById('fromAccount').value.trim(),
+                toAccountNo: document.getElementById('toAccount').value.trim(),
+                amount: Number(document.getElementById('amount').value)
             };
 
             try {
                 const response = await fetch('/api/account/transfer', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: jsonHeaders(),
                     body: JSON.stringify(payload)
                 });
 
@@ -82,9 +196,9 @@
                     resultDiv.className = 'success';
                     currentRequestId = requestId;
                     document.getElementById('copyBtn').style.display = 'block';
-                    resultDiv.innerHTML = `<strong>Accepted!</strong><br>Request ID: ${requestId}<br>Trace: <a href="#" onclick="alert('Trace ID linked to Grafana/Jaeger')">view trace</a><br>Message: ${message}`;
-                    document.getElementById('timeline').style.display = 'flex';
-                    document.getElementById('timeline').innerHTML = '<span>PENDING</span><span>PROCESSING</span><span class="active">COMPLETED</span>';
+                    resultDiv.innerHTML = `<strong>Accepted!</strong><br>Request ID: ${requestId}<br>Message: ${message}`;
+                    renderTimeline('QUEUED');
+                    pollTransferStatus(requestId);
                 } else {
                     resultDiv.className = 'error';
                     resultDiv.innerText = 'Error: ' + message;
@@ -99,7 +213,8 @@
             const acc = document.getElementById('historyAccount').value;
             if (!acc) return;
             try {
-                const res = await fetch('/api/account/' + acc + '/transactions?page=0&size=5');
+                const res = await fetch('/api/account/' + encodeURIComponent(acc) + '/transactions?page=0&size=5', { headers: authHeaders() });
+                if (!res.ok) { console.error('History request failed with status', res.status); return; }
                 const data = await res.json();
                 const tbody = document.querySelector('#historyTable tbody');
                 tbody.innerHTML = '';
@@ -133,14 +248,36 @@
             document.querySelector('.link-btn').innerText = t.gdpr;
         }
         async function exportGdpr() {
-            const userId = document.getElementById('fromAccount').value || '001';
+            const userId = document.getElementById('gdprUserId').value || (currentUser && currentUser.id) || '';
+            if (!userId) { alert('Please login or fill in a User ID'); return; }
             try {
-                const res = await fetch('/api/gdpr/user/' + userId);
+                // 导出用 GET /export；删除才用 DELETE，避免方法不匹配导致 405
+                const res = await fetch('/api/gdpr/user/' + encodeURIComponent(userId) + '/export', { headers: authHeaders() });
+                if (!res.ok) { alert('GDPR export failed with status ' + res.status); return; }
                 const blob = await res.blob();
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url; a.download = 'gdpr-export-' + userId + '.json'; a.click();
+                window.URL.revokeObjectURL(url);
             } catch (e) { alert('GDPR export failed'); }
+        }
+
+        async function deleteGdpr() {
+            const userId = document.getElementById('gdprUserId').value || (currentUser && currentUser.id) || '';
+            if (!userId) { alert('Please login or fill in a User ID'); return; }
+            if (!confirm('Anonymize PII for userId=' + userId + '? Transaction history is retained for statutory retention.')) return;
+            try {
+                const res = await fetch('/api/gdpr/user/' + encodeURIComponent(userId), {
+                    method: 'DELETE',
+                    headers: authHeaders()
+                });
+                const text = await res.text();
+                const box = document.getElementById('result');
+                box.style.display = 'block';
+                box.className = res.ok ? 'success' : 'error';
+                box.innerText = 'GDPR delete (' + res.status + '): ' + text;
+                if (res.ok && currentUser && String(currentUser.id) === String(userId)) logout();
+            } catch (e) { alert('GDPR delete failed'); }
         }
         async function checkHealth() {
             try {
@@ -156,6 +293,7 @@
         }
         setInterval(checkHealth, 5000);
         checkHealth();
+        loadCurrentUser();
     </script>
 </body>
 </html>

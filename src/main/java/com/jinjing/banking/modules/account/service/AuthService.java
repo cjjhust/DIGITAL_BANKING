@@ -7,14 +7,19 @@ import com.jinjing.banking.modules.account.entity.Role;
 import com.jinjing.banking.modules.account.entity.User;
 import com.jinjing.banking.modules.account.repository.UserRepository;
 import com.jinjing.banking.modules.account.util.JwtUtils;
+import io.jsonwebtoken.JwtException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * 认证服务
@@ -135,6 +140,52 @@ public class AuthService {
             .username(user.getUsername())
             .email(user.getEmail())
             .role(user.getRole().getCode())
+            .build();
+    }
+
+    /**
+     * 注销：把当前 Token 写入 Redis 黑名单，TTL 取剩余有效期。
+     * 请求本身可能已经过期（那就不需要注销），因此这里不抛异常，只回报结果。
+     */
+    public Map<String, Object> logout(String token) {
+        boolean revoked = jwtUtils.blacklistToken(token);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("revoked", revoked);
+        result.put("message", revoked ? "Token 已注销" : "Token 已过期，无需注销");
+        return result;
+    }
+
+    /**
+     * 刷新：用未过期的 Token 换取新 Token（旧 Token 立即失效），角色声明原样保留。
+     * 超出可刷新窗口、已被注销、已过期都会返回 401，要求重新登录。
+     */
+    public AuthResponse refresh(String token) {
+        String newToken;
+        try {
+            newToken = jwtUtils.refreshAccessToken(token);
+        } catch (JwtException e) {
+            throw new BusinessException(e.getMessage(), HttpStatus.UNAUTHORIZED);
+        }
+
+        String username = jwtUtils.getUsernameFromToken(newToken);
+        User user = userRepository.findByUsername(username)
+            .orElseThrow(() -> new BusinessException("用户不存在或已注销", HttpStatus.UNAUTHORIZED));
+        if (!Boolean.TRUE.equals(user.getEnabled())) {
+            throw new BusinessException("账户已停用", HttpStatus.UNAUTHORIZED);
+        }
+
+        log.info("Token 刷新成功: {}", username);
+
+        return AuthResponse.builder()
+            .token(newToken)
+            .tokenType("Bearer")
+            .expiresIn(jwtUtils.getExpirationTime() / 1000)
+            .user(AuthResponse.UserInfo.builder()
+                .id(user.getId())
+                .username(user.getUsername())
+                .email(user.getEmail())
+                .role(user.getRole().getCode())
+                .build())
             .build();
     }
 }

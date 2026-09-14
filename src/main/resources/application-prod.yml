@@ -15,6 +15,11 @@ spring:
     enabled: true
     locations: classpath:db/migration
 
+# 生产环境不放行 Swagger / OpenAPI，接口结构不对公网暴露
+app:
+  security:
+    expose-api-docs: false
+
 management:
   endpoints:
     web:

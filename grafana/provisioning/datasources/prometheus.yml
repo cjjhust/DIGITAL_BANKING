@@ -2,6 +2,19 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+# 告警规则文件（2026-09-14 新增）。
+# 规则只负责「判定」；真正推送通知交给 Alertmanager。
+rule_files:
+  - /etc/prometheus/banking-alerts.yml
+
+# Alertmanager 地址（2026-09-14 新增）。
+# Prometheus 只负责把「哪些告警正在 firing」推给 Alertmanager，
+# 由 Alertmanager 决定通知谁、怎么通知、多久通知一次。
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
 scrape_configs:
   - job_name: prometheus
     static_configs:
@@ -13,3 +26,7 @@ scrape_configs:
     relabel_configs:
       - replacement: production
         target_label: env
+  # 消费积压来自 broker 侧，必须单独抓；应用自身的 /actuator/prometheus 里没有 lag。
+  - job_name: kafka-exporter
+    static_configs:
+      - targets: ["kafka-exporter:9308"]

@@ -24,6 +24,13 @@ public interface ProcessedTransactionRepository extends JpaRepository<ProcessedT
 
     Optional<ProcessedTransaction> findByTransactionId(String transactionId);
 
+    // 受理结果查询：用客户端 requestId 定位最终状态
+    Optional<ProcessedTransaction> findByClientRequestId(String clientRequestId);
+
+    // GDPR 导出：一次取回多个账户的流水
+    @Query("SELECT pt FROM ProcessedTransaction pt WHERE pt.fromAccountNo IN :accountNumbers OR pt.toAccountNo IN :accountNumbers ORDER BY pt.createdAt DESC")
+    List<ProcessedTransaction> findByAccountNumbers(@Param("accountNumbers") java.util.Collection<String> accountNumbers);
+
     // 硬核幂等检查：判断该客户端请求是否已经作为最终结果落库
     boolean existsByClientRequestId(String clientRequestId);
 
@@ -39,4 +46,20 @@ public interface ProcessedTransactionRepository extends JpaRepository<ProcessedT
                               @Param("amount") BigDecimal amount);
 
     List<ProcessedTransaction> findByStatusAndCreatedAtBefore(ProcessedTransaction.Status status, LocalDateTime dateTime);
+
+    /**
+     * 原子认领一条超时 PENDING：单条 UPDATE 同时完成「检查状态」和「占用」，
+     * 多实例并发时只有一个实例能把 affected rows 变成 1（SELECT + UPDATE 两步做不到这点）。
+     * 已有未过期租约的记录不会被重复认领。
+     */
+    @Modifying
+    @Query(value = "UPDATE processed_transactions SET lease_owner = :owner, "
+            + "lease_expires_at = CURRENT_TIMESTAMP + (:ttlSeconds * INTERVAL '1 second'), "
+            + "updated_at = CURRENT_TIMESTAMP "
+            + "WHERE transaction_id = :transactionId AND status = 'PENDING' "
+            + "AND (lease_expires_at IS NULL OR lease_expires_at < CURRENT_TIMESTAMP)",
+            nativeQuery = true)
+    int claimPending(@Param("transactionId") String transactionId,
+                     @Param("owner") String owner,
+                     @Param("ttlSeconds") long ttlSeconds);
 }

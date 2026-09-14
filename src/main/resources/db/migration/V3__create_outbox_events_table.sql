@@ -11,6 +11,6 @@ CREATE TABLE IF NOT EXISTS outbox_events (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE UNIQUE INDEX idx_outbox_client_request_id ON outbox_events(client_request_id);
-CREATE INDEX idx_outbox_topic ON outbox_events(topic);
-CREATE INDEX idx_outbox_status ON outbox_events(status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_outbox_client_request_id ON outbox_events(client_request_id);
+CREATE INDEX IF NOT EXISTS idx_outbox_topic ON outbox_events(topic);
+CREATE INDEX IF NOT EXISTS idx_outbox_status ON outbox_events(status);

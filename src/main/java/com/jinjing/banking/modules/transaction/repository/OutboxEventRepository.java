@@ -13,6 +13,9 @@ public interface OutboxEventRepository extends JpaRepository<OutboxEvent, Long> 
     // 硬核点：根据客户端请求 ID 查重，利用数据库的唯一约束保证幂等性
     boolean existsByClientRequestId(String clientRequestId);
 
+    // 受理结果查询：requestId 已受理但还没被消费者占坑时，用它返回 QUEUED
+    java.util.Optional<OutboxEvent> findByClientRequestId(String clientRequestId);
+
     /**
      * 业内真正的高并发分发方案：FOR UPDATE SKIP LOCKED
      * 确保多个后端实例同时轮询时，能够自动跳过已被锁定的行，实现无损、无锁冲突的并发抓取。

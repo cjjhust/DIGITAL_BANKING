@@ -1,33 +1,19 @@
+# 本地开发镜像：JDK + Gradle，源码通过 compose 的 bind mount 挂进来，直接跑 bootRun。
+#
+# 安全收敛（2026-09-12）：
+#   早期版本在这里安装 OpenSSH、把 root 口令设成 123456、EXPOSE 22，compose 还挂载了宿主机的
+#   ~/.ssh/authorized_keys —— 等于把宿主机 shell 暴露给整个 Docker 网络，在德国金融场景属于红线。
+#   以上内容已全部移除，现在只暴露 8080 应用端口。
+#
+# 生产镜像建议（面试可讲）：多阶段构建 -> 只拷贝 bootJar -> 以非 root 用户运行 -> 只暴露 8080，
+# 并且不要把源码目录挂进容器。
 FROM eclipse-temurin:21-jdk
 WORKDIR /app
 
+# 先拷贝构建描述文件，让依赖解析单独成层，重建时命中缓存
+COPY gradlew settings.gradle build.gradle gradle.properties ./
+COPY gradle ./gradle
+RUN chmod +x ./gradlew
 
-
-# 1. 安装 OpenSSH Server
-# 注意：为了减小镜像大小，安装后清理 apt 缓存
-RUN apt-get update && apt-get install -y openssh-server \
-    && rm -rf /var/lib/apt/lists/*
-
-# 2. 配置 SSH
-RUN mkdir -p /var/run/sshd
-# 确保权限正确，否则 sshd 可能会拒绝启动
-RUN chmod 0755 /var/run/sshd
-# 允许 root 用户通过密码登录 (仅用于测试，生产环境强烈不建议)
-RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
-# 不要求 TTY (伪终端) 分配，这对于自动化脚本或某些 SSH 客户端可能有用
-RUN sed -i 's/UsePAM yes/UsePAM no/' /etc/ssh/sshd_config
-# 设置 root 用户的密码 (仅用于测试，生产环境强烈不建议)
-# 密码设置为 'rootpassword'，请根据需要修改
-RUN echo 'root:123456' | chpasswd
-
-# 3. 暴露 SSH 端口
-EXPOSE 22
-
-# 4. 复制并设置 entrypoint 脚本
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
-
-# 5. 使用 entrypoint 脚本作为容器的入口点
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-# 6. 在 Docker 网络中启动 Spring Boot，确保可以解析 db、cache 和 kafka
+# 在 Docker 网络中启动 Spring Boot（db / cache / kafka 用服务名解析）
 CMD ["./gradlew", "bootRun"]

@@ -1,0 +1,155 @@
+{
+  "uid": "banking_business_01",
+  "title": "Banking Business Analytics (ClickHouse)",
+  "description": "Business view straight from the ClickHouse audit table: volume, trend, top customers, amount structure and large transactions. Every panel is a fixed SQL query.",
+  "tags": ["banking", "business", "clickhouse"],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "refresh": "",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Today at a glance — transfers / amount / average / max",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 6 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "ClickHouse" },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": [], "fields": "", "values": true }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "ClickHouse" },
+          "queryType": "sql",
+          "editorType": "sql",
+          "format": 1,
+          "rawSql": "SELECT count() AS `笔数`, round(sum(amount), 2) AS `总金额`, round(avg(amount), 2) AS `单笔均值`, round(max(amount), 2) AS `最大单笔` FROM banking_analytics.transaction_audit WHERE created_at >= today()"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Volume per hour — 笔数 / 金额",
+      "gridPos": { "x": 0, "y": 6, "w": 12, "h": 9 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "ClickHouse" },
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 12, "lineWidth": 2 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "ClickHouse" },
+          "queryType": "sql",
+          "editorType": "sql",
+          "format": 0,
+          "rawSql": "SELECT toStartOfHour(created_at) AS time, count() AS `笔数`, round(sum(amount), 2) AS `金额` FROM banking_analytics.transaction_audit WHERE $__timeFilter(created_at) GROUP BY time ORDER BY time"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "barchart",
+      "title": "Top 5 付款账户 — 转出金额",
+      "gridPos": { "x": 12, "y": 6, "w": 12, "h": 9 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "ClickHouse" },
+      "options": { "orientation": "horizontal", "showValue": "auto" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "ClickHouse" },
+          "queryType": "sql",
+          "editorType": "sql",
+          "format": 1,
+          "rawSql": "SELECT from_account AS `账户`, round(sum(amount), 2) AS `转出金额` FROM banking_analytics.transaction_audit GROUP BY `账户` ORDER BY `转出金额` DESC LIMIT 5"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "piechart",
+      "title": "金额结构 — 小额多还是大额多",
+      "gridPos": { "x": 0, "y": 15, "w": 8, "h": 9 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "ClickHouse" },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "values": ["value"] }, "displayLabels": ["name", "percent"], "reduceOptions": { "calcs": [], "fields": "", "values": true } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "ClickHouse" },
+          "queryType": "sql",
+          "editorType": "sql",
+          "format": 1,
+          "rawSql": "SELECT multiIf(amount < 100, 'a. <100', amount < 1000, 'b. 100-1k', amount < 10000, 'c. 1k-10k', 'd. >=10k') AS `金额区间`, round(sum(amount), 2) AS `金额` FROM banking_analytics.transaction_audit GROUP BY `金额区间` ORDER BY `金额区间`"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "大额交易（≥ 10000）— 风控关注",
+      "gridPos": { "x": 8, "y": 15, "w": 16, "h": 9 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "ClickHouse" },
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "ClickHouse" },
+          "queryType": "sql",
+          "editorType": "sql",
+          "format": 1,
+          "rawSql": "SELECT created_at AS `时间`, from_account AS `付款账户`, to_account AS `收款账户`, amount AS `金额`, client_request_id AS `业务单号` FROM banking_analytics.transaction_audit WHERE amount >= 10000 ORDER BY created_at DESC LIMIT 20"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Settlement outcome — 成功率 / 成功 / 失败 / 总笔数",
+      "description": "数据来自 transaction_outcome（账本终态），不是 transaction_audit（事件接收流水）。两者的行数之差 = 进了 Kafka 但未算出结果的事件量。",
+      "gridPos": { "x": 0, "y": 24, "w": 24, "h": 5 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "ClickHouse" },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "auto",
+        "reduceOptions": { "calcs": [], "fields": "", "values": true }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "ClickHouse" },
+          "queryType": "sql",
+          "editorType": "sql",
+          "format": 1,
+          "rawSql": "SELECT round(countIf(status = 'COMPLETED') / count() * 100, 1) AS `成功率%`, countIf(status = 'COMPLETED') AS `成功笔数`, countIf(status != 'COMPLETED') AS `失败笔数`, count() AS `总笔数` FROM banking_analytics.transaction_outcome WHERE settled_at >= today()"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "barchart",
+      "title": "Failure reasons — 失败原因 TOP（账本终态口径）",
+      "description": "审计表没有 status 字段，回答不了这一问题；失败原因只存在于账本终态。",
+      "gridPos": { "x": 0, "y": 29, "w": 24, "h": 8 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "ClickHouse" },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": false }, "xTickLabelRotation": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "ClickHouse" },
+          "queryType": "sql",
+          "editorType": "sql",
+          "format": 0,
+          "rawSql": "SELECT error_message AS `失败原因`, count() AS `笔数` FROM banking_analytics.transaction_outcome WHERE status != 'COMPLETED' AND $__timeFilter(settled_at) GROUP BY `失败原因` ORDER BY `笔数` DESC LIMIT 8"
+        }
+      ]
+    }
+  ]
+}

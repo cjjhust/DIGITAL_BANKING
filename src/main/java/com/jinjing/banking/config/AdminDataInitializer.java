@@ -26,7 +26,8 @@ public class AdminDataInitializer {
     @Value("${app.default-admin.username:admin}")
     private String defaultAdminUsername;
 
-    @Value("${APP_DEFAULT_ADMIN_PASSWORD:admin123}")
+    // 不提供默认口令：未配置时直接启动失败，比默认 admin/admin123 安全得多
+    @Value("${APP_DEFAULT_ADMIN_PASSWORD:}")
     private String defaultAdminPassword;
 
     @Value("${app.default-admin.email:admin@example.com}")

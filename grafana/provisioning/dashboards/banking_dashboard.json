@@ -1,5 +1,7 @@
 {
-  "annotations": { "list": [] },
+  "annotations": {
+    "list": []
+  },
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
@@ -9,16 +11,30 @@
     {
       "title": "Redis Cache Hit Rate (幂等锁命中率)",
       "type": "gauge",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "green", "value": 80 }
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 80
+              }
             ]
           },
           "unit": "percent"
@@ -26,7 +42,8 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(cache_gets_total{result=\"hit\"}[1m])) / sum(rate(cache_gets_total[1m])) * 100",
+          "expr": "sum(rate(banking_redis_idempotency_hit_total[5m])) / clamp_min(sum(rate(banking_redis_idempotency_hit_total[5m])) + sum(rate(banking_redis_idempotency_miss_total[5m])), 0.001) * 100",
+          "legendFormat": "幂等命中率 %",
           "refId": "A"
         }
       ]
@@ -34,18 +51,30 @@
     {
       "title": "Kafka Consumer Lag (消费积压延迟)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "fieldConfig": {
         "defaults": {
-          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10 },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10
+          },
           "unit": "none"
         }
       },
       "targets": [
         {
-          "expr": "max(kafka_consumer_fetch_manager_records_lag)",
-          "legendFormat": "Consumer Lag (Max)",
+          "expr": "max by (consumergroup, topic) (kafka_consumergroup_lag)",
+          "legendFormat": "{{consumergroup}} / {{topic}}",
           "refId": "A"
         }
       ]
@@ -53,51 +82,119 @@
     {
       "title": "Successful Transfers",
       "type": "stat",
-      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 8 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "fieldConfig": {
-        "defaults": { "unit": "short", "color": { "mode": "thresholds" } }
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          }
+        }
       },
       "targets": [
-        { "expr": "sum(transfer_success_total)", "refId": "A" }
+        {
+          "expr": "sum(transfer_success_total)",
+          "refId": "A"
+        }
       ]
     },
     {
       "title": "Failed Transfers",
       "type": "stat",
-      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 8 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "fieldConfig": {
-        "defaults": { "unit": "short", "color": { "mode": "thresholds" } }
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          }
+        }
       },
       "targets": [
-        { "expr": "sum(transfer_failure_total)", "refId": "A" }
+        {
+          "expr": "sum(transfer_failure_total)",
+          "refId": "A"
+        }
       ]
     },
     {
       "title": "Transfer Throughput",
       "type": "timeseries",
-      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 8 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "x": 0,
+        "y": 15,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "fieldConfig": {
-        "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "fillOpacity": 10 } }
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        }
       },
       "targets": [
-        { "expr": "rate(transfer_success_total[1m])", "legendFormat": "success/s", "refId": "A" },
-        { "expr": "rate(transfer_failure_total[1m])", "legendFormat": "failure/s", "refId": "B" }
+        {
+          "expr": "rate(transfer_success_total[5m])",
+          "legendFormat": "success/s",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(transfer_failure_total[5m])",
+          "legendFormat": "failure/s",
+          "refId": "B"
+        }
       ]
     },
     {
       "title": "Transfer Processing Latency",
       "type": "timeseries",
-      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 8 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "x": 12,
+        "y": 15,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "fieldConfig": {
-        "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 10 } }
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        }
       },
       "targets": [
         {
-          "expr": "rate(transfer_duration_seconds_sum[1m]) / rate(transfer_duration_seconds_count[1m])",
+          "expr": "rate(transfer_duration_seconds_sum[5m]) / rate(transfer_duration_seconds_count[5m])",
           "legendFormat": "average latency",
           "refId": "A"
         }
@@ -107,9 +204,17 @@
   "refresh": "5s",
   "schemaVersion": 36,
   "style": "dark",
-  "tags": ["banking", "micrometer"],
-  "templating": { "list": [] },
-  "time": { "from": "now-15m", "to": "now" },
+  "tags": [
+    "banking",
+    "micrometer"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
   "title": "Banking Service Observability",
   "uid": "banking_obs_01"
 }

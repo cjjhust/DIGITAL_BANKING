@@ -1,0 +1,99 @@
+{{/* 告警邮件模板（2026-09-14 新增）
+     设计目标：**收到邮件的人不需要打开任何系统，看完邮件就知道该干什么**。
+     所以邮件里必须包含三样东西：
+       1. 严重程度（一眼看出要不要立刻处理）
+       2. 现在发生了什么（summary + description）
+       3. 第一件事做什么（action）
+*/}}
+
+{{ define "banking.email.html" }}
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+           color: #1f2328; line-height: 1.6; }
+    .card { border: 1px solid #d0d7de; border-radius: 8px; overflow: hidden;
+            max-width: 720px; margin: 0 auto; }
+    .head { padding: 14px 18px; color: #fff; }
+    .head.critical { background: #cf222e; }
+    .head.warning  { background: #bf8700; }
+    .head.resolved { background: #1a7f37; }
+    .head h2 { margin: 0; font-size: 16px; }
+    .body { padding: 18px; }
+    .alert { border-top: 1px solid #eaeef2; padding: 14px 0; }
+    .alert:first-child { border-top: none; }
+    .label { display: inline-block; padding: 1px 8px; border-radius: 10px;
+             font-size: 12px; font-weight: 600; margin-right: 6px; }
+    .label.critical { background: #ffebe9; color: #cf222e; }
+    .label.warning  { background: #fff8c5; color: #7d4e00; }
+    .label.resolved { background: #dafbe1; color: #1a7f37; }
+    .meta { color: #656d76; font-size: 13px; }
+    .action { background: #f6f8fa; border-left: 3px solid #0969da;
+              padding: 10px 12px; margin-top: 8px; font-size: 13px;
+              white-space: pre-wrap; border-radius: 4px; }
+    .kv { font-size: 13px; margin-top: 8px; }
+    .kv td { padding: 2px 10px 2px 0; vertical-align: top; }
+    .kv td:first-child { color: #656d76; white-space: nowrap; }
+    .foot { padding: 12px 18px; background: #f6f8fa; font-size: 12px; color: #656d76; }
+    code { background: #f6f8fa; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  </style>
+</head>
+<body>
+
+{{ $status := .Status }}
+{{ $isResolved := eq $status "resolved" }}
+
+<div class="card">
+  <div class="head {{ if $isResolved }}resolved{{ else }}{{ .CommonLabels.severity }}{{ end }}">
+    <h2>
+      {{ if $isResolved }}✅ 已恢复{{ else }}🚨 告警{{ end }}：
+      {{ .CommonAnnotations.summary }}
+    </h2>
+  </div>
+
+  <div class="body">
+    {{ if $isResolved }}
+      <p class="meta">以下告警已经恢复正常，无需处理。若仍然影响业务，请手工确认。</p>
+    {{ end }}
+
+    {{ range .Alerts }}
+      <div class="alert">
+        <span class="label {{ if $isResolved }}resolved{{ else }}{{ .Labels.severity }}{{ end }}">
+          {{ if $isResolved }}RESOLVED{{ else }}{{ .Labels.severity }}{{ end }}
+        </span>
+        <strong>{{ .Labels.alertname }}</strong>
+        <span class="meta">· 层级 {{ .Labels.layer }}</span>
+
+        <div style="margin-top:8px">{{ .Annotations.description }}</div>
+
+        {{ if .Annotations.action }}
+          <div class="action"><strong>第一时间做什么：</strong>
+{{ .Annotations.action }}</div>
+        {{ end }}
+
+        <table class="kv">
+          {{ range $k, $v := .Labels }}
+            {{ if not (or (eq $k "alertname") (eq $k "severity") (eq $k "layer")) }}
+              <tr><td>{{ $k }}</td><td><code>{{ $v }}</code></td></tr>
+            {{ end }}
+          {{ end }}
+          <tr><td>开始时间</td><td>{{ .StartsAt.Format "2006-01-02 15:04:05" }}</td></tr>
+          {{ if not .EndsAt.IsZero }}
+            <tr><td>恢复时间</td><td>{{ .EndsAt.Format "2006-01-02 15:04:05" }}</td></tr>
+          {{ end }}
+        </table>
+      </div>
+    {{ end }}
+  </div>
+
+  <div class="foot">
+    由 Alertmanager 自动发送 · {{ .Alerts | len }} 条告警 ·
+    值班手册：<code>TODO.MD §7.18</code>（告警规则）· <code>§7.5</code>（排错手册）
+  </div>
+</div>
+
+</body>
+</html>
+{{ end }}

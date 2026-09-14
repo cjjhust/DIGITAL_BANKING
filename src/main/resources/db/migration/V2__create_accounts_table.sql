@@ -6,5 +6,5 @@ CREATE TABLE IF NOT EXISTS accounts (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_accounts_account_number ON accounts(account_number);
-CREATE INDEX idx_accounts_owner_name ON accounts(owner_name);
+CREATE INDEX IF NOT EXISTS idx_accounts_account_number ON accounts(account_number);
+CREATE INDEX IF NOT EXISTS idx_accounts_owner_name ON accounts(owner_name);

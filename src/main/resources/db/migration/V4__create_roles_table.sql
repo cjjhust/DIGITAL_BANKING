@@ -5,4 +5,4 @@ CREATE TABLE IF NOT EXISTS roles (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_roles_name ON roles(name);
+CREATE INDEX IF NOT EXISTS idx_roles_name ON roles(name);

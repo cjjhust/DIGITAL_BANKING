@@ -29,10 +29,9 @@ spring:
     hibernate:
       ddl-auto: validate # Flyway 管理表结构，JPA 只做验证
       open-in-view: false # 建议关闭，以避免生产环境中的性能问题和长事务
-    show-sql: true # 在控制台打印 SQL (调试用)
-    #properties:
-      #hibernate:
-        #format_sql: true # 格式化 SQL (使 show-sql 更易读)
+    # 默认不在控制台打印 SQL：避免 SQL 参数（PII）被 Filebeat 送进 Elasticsearch。
+    # 需要调试时用环境变量打开：SPRING_JPA_SHOW_SQL=true
+    show-sql: ${SPRING_JPA_SHOW_SQL:false}
     database-platform: org.hibernate.dialect.PostgreSQLDialect # 指定 PostgreSQL 方言
 
   # Redis 配置
@@ -40,6 +39,7 @@ spring:
     redis:
       host: ${SPRING_DATA_REDIS_HOST:cache}
       port: ${SPRING_DATA_REDIS_PORT:6379}
+      password: ${SPRING_DATA_REDIS_PASSWORD:}
       repositories:
         enabled: true # 启用 Redis repositories (如果你需要)
 
@@ -49,9 +49,19 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    # 观测开关：不打开的话消费者会各自新建一条 trace，链路断在 Kafka 这一跳
+    # （实测：Zipkin 里 20 条 trace 有 19 条只有 1 个 span）。
+    # 打开后：发送端发出 send span 并把上下文写进 header；消费端从 header 恢复父上下文，
+    # 于是「HTTP 受理 → Outbox 中继 → Kafka → 消费者」串成同一条 trace。
+    template:
+      observation-enabled: true
+    listener:
+      observation-enabled: true
 
   clickhouse:
-    jdbc-url: ${SPRING_CLICKHOUSE_URL:jdbc:clickhouse://clickhouse:8123/banking_analytics}
+    # 必须显式写 http://：只写 jdbc:clickhouse://host:8123 时驱动会按原生协议(Native)连接，
+    # 打到 HTTP 端口上会报 "Magic is not correct - expect [-126] but got [-43]"。
+    jdbc-url: ${SPRING_CLICKHOUSE_URL:jdbc:clickhouse:http://clickhouse:8123/banking_analytics}
     username: ${SPRING_CLICKHOUSE_USERNAME:admin}
     password: ${SPRING_CLICKHOUSE_PASSWORD:secret}
     driver-class-name: com.clickhouse.jdbc.ClickHouseDriver
@@ -76,6 +86,13 @@ management:
   otlp:
     tracing:
       endpoint: ${MANAGEMENT_OTLP_TRACING_ENDPOINT:http://otel-collector:4318/v1/traces}
+    metrics:
+      export:
+        # 指标统一走 Prometheus（/actuator/prometheus → Prometheus → Grafana），
+        # OTLP 只用来传 traces。不关掉的话应用会按固定周期报
+        # "Failed to publish metrics to OTLP receiver" —— 因为 otel-collector 的
+        # pipeline 里只声明了 traces，metrics 被拒收，白刷 WARN 日志。
+        enabled: false
   opentelemetry:
     tracing:
       export:
@@ -95,15 +112,42 @@ redisson:
       urls: ${REDIS_URL:redis://cache:6379}
 
 # 日志配置 (使用 Logstash Encoder)
+# 日志级别
+#   - 默认不打印 SQL 与参数绑定：SQL 参数含账号/金额，属于 PII，会经 Filebeat 进 Elasticsearch
+#   - org.springframework.kafka 提到 INFO：死信(DLT)/重试的失败信息默认在 DEBUG，不提升会"静默堆死信"
+#   调试 SQL 时：SPRING_JPA_SHOW_SQL=true + LOGGING_LEVEL_ORG_HIBERNATE_SQL=DEBUG
 logging:
   level:
-    org.hibernate.SQL: DEBUG
-    org.hibernate.type.descriptor.sql: TRACE
+    org.hibernate.SQL: ${LOGGING_LEVEL_ORG_HIBERNATE_SQL:WARN}
+    org.hibernate.orm.jdbc.bind: ${LOGGING_LEVEL_ORG_HIBERNATE_BIND:WARN}
+    org.springframework.kafka: ${LOGGING_LEVEL_SPRING_KAFKA:INFO}
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
 
+# 业务参数（可由环境变量覆盖，改限额/阈值不需要重新编译）
+banking:
+  # 雪花 ID：多实例部署时每个实例必须配置不同的 worker-id（0~1023），否则会生成重复 ID
+  snowflake:
+    worker-id: ${BANKING_SNOWFLAKE_WORKER_ID:0}
+  transfer:
+    # 单笔转账限额
+    max-amount: ${BANKING_TRANSFER_MAX_AMOUNT:10000}
+    # 幂等窗口（Redis 键存活时间，秒）。窗口内若数据库没有受理记录，受理接口返回 409 让客户端重试；
+    # 窗口越长，这段“不确定期”越长，所以不要设成分钟级。
+    idempotency-window-seconds: ${BANKING_TRANSFER_IDEMPOTENCY_WINDOW_SECONDS:30}
+  recovery:
+    # 多久没动静的 PENDING 算“卡住”
+    pending-threshold-minutes: ${BANKING_PENDING_THRESHOLD_MINUTES:5}
+    # 租约有效期：期间内其它实例不会重复认领同一条记录
+    lease-ttl-seconds: ${BANKING_LEASE_TTL_SECONDS:300}
+  # 实例标识：留空时自动用 JVM 名（pid@host）
+  instance-id: ${BANKING_INSTANCE_ID:}
+
 # JWT 配置
 app:
+  # 本地开发放行 Swagger / OpenAPI；生产环境保持 false（否则接口结构对外暴露）
+  security:
+    expose-api-docs: true
   #jwtSecret: <至少 256 位的强密钥>  # ❌ 不要用默认值！
   jwtSecret: ${APP_JWT_SECRET:}
   jwtExpirationMs: 3600000 # 1 小时（单位：毫秒）调整过期时间

@@ -2,6 +2,7 @@ package com.jinjing.banking.config;
 
 import com.jinjing.banking.modules.account.service.CustomUserDetailsService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -33,6 +34,14 @@ public class SecurityConfig {
 
     private final CustomUserDetailsService userDetailsService;
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+
+    /**
+     * 是否放行 Swagger / OpenAPI 端点。
+     * 默认关闭：接口文档会暴露全部 API 结构，生产环境不应对外开放；
+     * 本地开发在 application.yml 里打开，生产在 application-prod.yml 里保持 false。
+     */
+    @Value("${app.security.expose-api-docs:false}")
+    private boolean exposeApiDocs;
 
     /**
      * 定义密码编码器
@@ -87,6 +96,11 @@ public class SecurityConfig {
                 .requestMatchers("/", "/index.html", "/favicon.ico").permitAll()
                 .requestMatchers("/actuator/health").permitAll()
                 .requestMatchers("/actuator/prometheus").permitAll()
+
+                // Swagger：仅当 app.security.expose-api-docs=true 时放行（默认关闭）
+                .requestMatchers(exposeApiDocs
+                        ? new String[]{"/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**"}
+                        : new String[0]).permitAll()
 
                 // 任何其他请求都需要认证
                 .anyRequest().authenticated()

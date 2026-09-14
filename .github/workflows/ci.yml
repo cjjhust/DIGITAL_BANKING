@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x ./gradlew
+
+      # 测试不需要 Docker：单元测试 + ArchUnit 全部是纯 JVM 测试。
+      # 端到端验证（scripts/verify_e2e.py）需要完整 Compose 栈，放在本地/预发环境跑。
+      - name: Test (unit + architecture)
+        run: ./gradlew --no-daemon test
+
+      - name: Build executable jar
+        run: ./gradlew --no-daemon bootJar
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: build/reports/tests/test/
+          if-no-files-found: ignore

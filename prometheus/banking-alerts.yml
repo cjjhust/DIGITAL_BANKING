@@ -1,0 +1,190 @@
+# Prometheus 告警规则（2026-09-14 新增）
+#
+# 设计原则：
+#   1. 只用**已经验证有数据**的指标，规则一上线就能被正确求值（不留 No data 的死规则）
+#   2. 每条规则都带 `for:`，避免抖动误报（瞬时毛刺不该吵醒人）
+#   3. severity 分两级：critical = 业务不转了 / warning = 需要关注但还没断
+#   4. annotations 里写清「说明 + 第一件事做什么」，接电话的人不用去翻文档
+#
+# ⚠️ 职责边界：**本文件只负责「判定」，不负责「通知」**。
+#    规则触发后出现在 Prometheus 的 /alerts 页面，同时推给 Alertmanager。
+#    通知谁、怎么通知、多久通知一次，全部由 alertmanager/alertmanager.yml 决定：
+#        邮件   → alertmanager/templates/banking-email.tmpl
+#        手机   → alertrelay/relay.py → ntfy.sh
+#    完整链路与实测记录见 TODO.MD §7.18 / §7.19 / §7.20。
+
+groups:
+  # ─────────────────────────────────────────────────────────────
+  # ① 采集层：连数据都抓不到，后面全是瞎猜
+  # ─────────────────────────────────────────────────────────────
+  - name: banking-targets
+    rules:
+      - alert: BankingTargetDown
+        expr: up{job=~"banking-service|kafka-exporter"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          layer: collection
+        annotations:
+          summary: "采集目标失联：{{ $labels.job }} ({{ $labels.instance }})"
+          description: >-
+            Prometheus 连续 1 分钟抓不到 {{ $labels.instance }}。
+            此时所有基于该目标的 Grafana 面板都会变成 No data ——
+            注意「面板空白」不等于「系统没流量」，先看这里。
+          action: >-
+            1) docker ps | grep {{ $labels.job }} 看容器在不在
+            2) curl {{ $labels.instance }}/actuator/health 看应用是否存活
+            3) docker logs 看最近报错
+
+  # ─────────────────────────────────────────────────────────────
+  # ② 管道层：消息进得去、消费跟不上 —— 用户会表现为「提交了但一直没到账」
+  # ─────────────────────────────────────────────────────────────
+  - name: banking-pipeline
+    rules:
+      - alert: KafkaConsumerLagSustained
+        expr: max by (consumergroup, topic) (kafka_consumergroup_lag) > 0
+        for: 5m
+        labels:
+          severity: critical
+          layer: pipeline
+        annotations:
+          summary: "消费积压：group={{ $labels.consumergroup }} topic={{ $labels.topic }}"
+          description: >-
+            该消费者组持续 5 分钟积压 {{ $value }} 条。
+            注意这个数字来自 **broker 侧**（kafka-exporter 直接问 broker），
+            所以即使应用已经挂掉、无法自报，这个指标仍然可见 —— 这正是它作为首选告警指标的原因。
+          action: >-
+            1) 看 Grafana「Kafka Consumer Lag」面板确认趋势
+            2) kubectl/docker logs 看消费者是否在报错重试
+            3) 检查下游依赖（PostgreSQL / ClickHouse）是否变慢
+
+      - alert: KafkaConsumerGroupEmpty
+        expr: kafka_consumergroup_members == 0
+        for: 2m
+        labels:
+          severity: critical
+          layer: pipeline
+        annotations:
+          summary: "消费者组没有成员：{{ $labels.consumergroup }}"
+          description: >-
+            该消费者组当前 0 个成员 = 消费者进程全部退出，消息将无限堆积。
+          action: "确认消费者容器/实例是否存活并已加入组"
+
+      - alert: DeadLetterReceived
+        expr: increase(kafka_consumergroup_current_offset{consumergroup=~".*dlt.*"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          layer: pipeline
+        annotations:
+          summary: "死信队列有新消息：{{ $labels.consumergroup }} (+{{ $value }})"
+          description: >-
+            最近 10 分钟有消息被投递到死信主题（{{ $labels.topic }}）。
+            死信意味着「重试耗尽仍未成功」，可能涉及资金，需要人工判断。
+          action: >-
+            1) 用 Kibana 按 level:ERROR + 时间窗搜日志定位原因
+            2) 查事务终态：SELECT * FROM processed_transactions WHERE error_message LIKE '%DLQ%'
+            3) 确认是否需要人工补账（本项目**不做**自动补账）
+
+      - alert: AuditConsumerLagSustained
+        expr: max by (consumergroup) (kafka_consumergroup_lag{consumergroup="analytics-group"}) > 0
+        for: 10m
+        labels:
+          severity: warning
+          layer: pipeline
+        annotations:
+          summary: "审计消费者积压：{{ $value }} 条"
+          description: >-
+            分析消费者持续 10 分钟积压。它不阻塞交易主链路（旁路消费），
+            但会导致 ClickHouse 业务看板数据滞后。
+          action: "检查 ClickHouse 是否可用 / 写入是否变慢"
+
+  # ─────────────────────────────────────────────────────────────
+  # ③ 业务层：管道是通的，但业务在变差
+  # ─────────────────────────────────────────────────────────────
+  - name: banking-business
+    rules:
+      # 注意：transfer_success_total / failure_total 是**进程内计数器**，应用重启会归零。
+      # PromQL 的 rate() 能自动识别 counter reset，所以重启不会造成误报尖峰。
+      - alert: TransferFailureRateHigh
+        expr: >-
+          sum(rate(transfer_failure_total[10m]))
+          / clamp_min(
+              sum(rate(transfer_success_total[10m])) + sum(rate(transfer_failure_total[10m])),
+              0.001)
+          > 0.5
+        for: 5m
+        labels:
+          severity: critical
+          layer: business
+        annotations:
+          summary: "转账失败率超过 50%（当前 {{ $value | humanizePercentage }}）"
+          description: >-
+            窗口内失败占比过半。注意区分两类原因 ——
+            **业务原因**（余额不足、超限、自转账）是风控在正常工作；
+            **系统原因**（DLQ、超时、连接失败）才是故障。
+            两者在 ClickHouse 的 transaction_outcome.error_message 里可以区分。
+          action: >-
+            1) 打开 Grafana 业务看板「Failure reasons TOP」看失败原因分布
+            2) 若全是业务原因 → 检查是否上游在压测或规则变更
+            3) 若出现系统原因 → 按管道层告警继续排查
+
+      - alert: TransferThroughputStopped
+        expr: sum(rate(transfer_success_total[10m])) == 0
+        for: 20m
+        labels:
+          severity: warning
+          layer: business
+        annotations:
+          summary: "连续 20 分钟没有成功转账"
+          description: >-
+            可能是真的没业务，也可能是入口/管道断了。
+            需结合 KafkaConsumerLag 一起判断：积压在涨 = 断了；积压为 0 = 真的没流量。
+          action: "1) 确认是否业务低峰 2) 手工发一笔转账验证 (scripts/demo_traffic.py)"
+
+      - alert: TransferLatencyHigh
+        expr: >-
+          sum(rate(transfer_duration_seconds_sum[5m]))
+          / clamp_min(sum(rate(transfer_duration_seconds_count[5m])), 0.001)
+          > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          layer: business
+        annotations:
+          summary: "转账平均处理耗时大于 500ms（当前 {{ $value }}s）"
+          description: >-
+            正常值是几十毫秒。持续升高通常意味着数据库慢查询、锁竞争、GC 或下游（ClickHouse）变慢。
+          action: "1) 看 Grafana Processing Latency 面板 2) 查 hikaricp_connections_pending 是否排队"
+
+  # ─────────────────────────────────────────────────────────────
+  # ④ 资源层：还没坏，但快坏了
+  # ─────────────────────────────────────────────────────────────
+  - name: banking-resources
+    rules:
+      - alert: DbConnectionPoolSaturated
+        expr: hikaricp_connections_pending > 0
+        for: 2m
+        labels:
+          severity: warning
+          layer: resource
+        annotations:
+          summary: "数据库连接池出现排队：{{ $value }} 个请求在等连接"
+          description: >-
+            连接池（pool={{ $labels.pool }}）持续 2 分钟有请求排队。
+            说明要么连接不够用，要么有慢查询长时间占着连接。
+          action: "1) 查 hikaricp_connections_active 对比最大值 2) 找慢查询"
+
+      - alert: JvmHeapUsageHigh
+        expr: >-
+          (sum(jvm_memory_used_bytes{area="heap"})
+           / sum(jvm_memory_max_bytes{area="heap"} > 0)) * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+          layer: resource
+        annotations:
+          summary: "JVM 堆使用率大于 90%（当前 {{ $value }}%）"
+          description: >-
+            堆接近上限，Full GC 会变频繁，表现为请求延迟抖动。
+          action: "1) 看 jvm_gc_pause_seconds 是否变长 2) 考虑调大 -Xmx 或排查内存泄漏"

@@ -1,9 +1,11 @@
 package com.jinjing.banking.modules.account.controller;
 
+import com.jinjing.banking.common.exception.BusinessException;
 import com.jinjing.banking.modules.account.dto.AuthResponse;
 import com.jinjing.banking.modules.account.dto.LoginRequest;
 import com.jinjing.banking.modules.account.dto.RegisterRequest;
 import com.jinjing.banking.modules.account.service.AuthService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -11,6 +13,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
 
 /**
  * 认证控制器
@@ -73,5 +77,44 @@ public class AuthController {
             public final boolean valid = true;
             public final String message = "Token 有效";
         });
+    }
+
+    /**
+     * 注销
+     * POST /api/auth/logout
+     * 请求头: Authorization: Bearer <token>
+     * 效果：Token 进入 Redis 黑名单（TTL = 剩余有效期），之后该 Token 立即失效
+     */
+    @PostMapping("/logout")
+    public ResponseEntity<Map<String, Object>> logout(HttpServletRequest request) {
+        String token = extractBearerToken(request);
+        if (token == null) {
+            throw new BusinessException("缺少 Authorization: Bearer <token> 请求头", HttpStatus.UNAUTHORIZED);
+        }
+        return ResponseEntity.ok(authService.logout(token));
+    }
+
+    /**
+     * 刷新 Token
+     * POST /api/auth/refresh
+     * 请求头: Authorization: Bearer <token>（未过期的旧 Token）
+     * 响应：与登录相同，返回新的 Token；旧 Token 立即失效（轮换）
+     */
+    @PostMapping("/refresh")
+    public ResponseEntity<AuthResponse> refresh(HttpServletRequest request) {
+        String token = extractBearerToken(request);
+        if (token == null) {
+            throw new BusinessException("缺少 Authorization: Bearer <token> 请求头", HttpStatus.UNAUTHORIZED);
+        }
+        log.info("Token 刷新请求");
+        return ResponseEntity.ok(authService.refresh(token));
+    }
+
+    private String extractBearerToken(HttpServletRequest request) {
+        String header = request.getHeader("Authorization");
+        if (header != null && header.startsWith("Bearer ")) {
+            return header.substring(7);
+        }
+        return null;
     }
 }

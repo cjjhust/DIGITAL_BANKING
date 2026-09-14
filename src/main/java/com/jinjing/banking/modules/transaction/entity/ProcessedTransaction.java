@@ -36,6 +36,16 @@ public class ProcessedTransaction {
 
     private String errorMessage;
 
+    /**
+     * PENDING 租约：哪个实例认领了这条超时交易。
+     * 多实例部署时，没有租约的话每个实例的定时任务都会扫到同一批记录，重复告警/重复补偿。
+     */
+    @Column(name = "lease_owner", length = 120)
+    private String leaseOwner;
+
+    @Column(name = "lease_expires_at")
+    private LocalDateTime leaseExpiresAt;
+
     public enum Status {
         PENDING, COMPLETED, FAILED
     }
