@@ -60,12 +60,21 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
       - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
     depends_on:
-      - db
-      - cache
-      - kafka
-      - zipkin
-      - otel-collector
-      - elasticsearch
+      # kafka 必须是 service_healthy 而非 service_started：
+      # 否则 KafkaAdmin 会在 broker 就绪前建主题、静默失败，
+      # 主题会被 auto-create 成 1 分区（详见 kafka 服务的 healthcheck 注释）。
+      kafka:
+        condition: service_healthy
+      db:
+        condition: service_started
+      cache:
+        condition: service_started
+      zipkin:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+      elasticsearch:
+        condition: service_started
     ports:
       - "8080:8080"
     networks:
@@ -96,8 +105,26 @@ services:
       - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
       - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
       - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
+      # 【兜底，2026-09-15】即使主题被 auto-create 抢先建成，也按 3 分区建，
+      # 与消费者侧 concurrency=3 匹配。根因见下方 healthcheck 注释。
+      - KAFKA_NUM_PARTITIONS=3
       - KAFKA_HEAP_OPTS=-Xmx512m -Xms512m
       # 增加堆内存
+    healthcheck:
+      # 【为什么必须有这个 healthcheck（2026-09-15 全新克隆实测发现）】
+      # app 原来只 depends_on: kafka（容器级），而容器一"Created"就算满足 —— 此时
+      # broker 还没开始应答。于是 app 里的 KafkaAdmin 建主题失败
+      # （spring.kafka.admin.fail-fast 默认 false → 只记 WARN，静默跳过），
+      # 随后消费者请求元数据触发 broker 的 auto.create.topics.enable=true，
+      # 主题被建成 broker 默认的 num.partitions=1；而 NewTopic **不会修改已存在的主题**
+      # → 永远卡在 1 分区。表现：concurrency=3，但只有 1 个分区在消费。
+      # 注：旧环境能过是因为当初手工执行过 kafka-topics --alter --partitions 3，
+      # 那一步不在仓库里，所以全新克隆必现。
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 15s
     deploy:
       resources:
         limits:

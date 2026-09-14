@@ -38,6 +38,25 @@ docker compose stop        # 保留容器与数据卷（推荐，下次起得快
 python3 scripts/verify_e2e.py  # 26 项端到端断言，需要栈在跑
 ```
 
+### ★ 真正的验收标准：陌生人克隆能不能跑通
+
+「在自己机器上能跑」不算数。**唯一可信的验收方式**是把仓库克隆到一个空目录，
+以陌生人身份照着 README 走一遍：
+
+```bash
+git clone https://github.com/cjjhust/DIGITAL_BANKING.git /tmp/fresh-check
+cd /tmp/fresh-check
+cp .env.example .env           # README 里写了这一步；4 个敏感值可直接用占位符跑通
+docker compose up -d --build   # 首次约 130 秒应用就绪
+python3 scripts/verify_e2e.py  # 期望 26 PASS / 0 FAIL
+```
+
+⚠️ 跑之前先 `docker compose down` 停掉原环境 —— 本项目用了**固定的 `container_name`**，
+两套栈不能同时起。
+
+> 2026-09-15 用这个方法发现了 L1（主题分区数竞态），修完才做到 26/26。
+> **以后任何改动，都用这条路径验收。**
+
 ### 全部入口
 
 | 服务 | 地址 | 凭据 |
@@ -133,6 +152,9 @@ git remote -v     # origin https://github.com/cjjhust/DIGITAL_BANKING.git
 
 - [x] **G1 主题分区数与消费者并发度不匹配** —— `KafkaConsumerConfig` 设了 `concurrency = 3`，但 `banking-transfers` 实测 `PartitionCount: 1`（auto-create 默认值），**3 个消费者线程里只有 1 个在工作**。Kafka 的并行单位是 partition，消费者怎么调都补不回来。
   - 修复：新增 `config/KafkaTopicConfig.java`，用 `NewTopic` 显式声明 `banking-transfers` 3 个分区（两个死信主题保持 1）；已存在的主题 `NewTopic` 不会改，需手工 `kafka-topics --alter --partitions 3`（已执行，实测 `PartitionCount: 3`）
+  - ⚠️ **上面这个修复当时只做了一半 —— 详见 L1（2026-09-15 发现）**：
+    `NewTopic` 声明从未生效，真正建主题的是 broker 的 auto-create；
+    「已执行的手工 alter」不可复现，全新克隆必然退回 1 分区。
   - 回归断言：`verify_e2e.py` 第 25 项
 - [x] **G2 受理阶段无条件返回 202 会静默丢单** —— `transfer()` 里 `SET NX` 成功后若在 Outbox 落库前崩溃，Redis 键会残留（窗口内）而库里**一行都没有**；原代码无条件返回 **202**，客户端会认为已受理并停止重试，**这笔转账从未被记录**。根因是返回码语义错了：202 应该是「已持久化、会被处理」，而 Redis 命中只代表「窗口内见过这个 requestId」。
   - 修复：202 **只由数据库里确实存在的受理痕迹产生**（Outbox 行或终态记录）；否则返回 **409 + `Retry-After: 5`**，明确告诉客户端「在途或上次中断，请用同一 requestId 重试」；同时把 Redis 窗口改为可配 `banking.transfer.idempotency-window-seconds`（默认 30s，原来是写死的 1 分钟）
@@ -251,6 +273,73 @@ git remote -v     # origin https://github.com/cjjhust/DIGITAL_BANKING.git
   也就是说：**告警体系上线当天就抓到了一起真实事故**。区分方法见 7.19.8
 
 > 三个新章节：**7.16**（为什么 Zipkin 查不到历史）· **7.17**（谁存数据谁存图表）· **7.18**（告警规则设计与实测）
+
+---
+
+### L 组：以「面试官会怎么拉代码」为标准的可用性审计（2026-09-15）
+
+把仓库克隆到一个空目录，**以陌生人身份照着 README 跑一遍**。这一轮是这类审计，
+结论先用一句话说：**修之前，克隆下来跑不过。**
+
+- [x] **L1 全新克隆验证 → 发现主题分区数竞态（真 bug，已修）**
+
+  **现象**：克隆后 `docker compose up -d`，`verify_e2e.py` **第 25 项失败**：
+  ```
+  FAIL 25. 转账主题分区数 ≥ 3（与 concurrency=3 匹配）  | partitions=1
+  === 25 PASS / 1 FAIL ===
+  ```
+
+  **根因链**（四步，每步都有实测依据）：
+  1. compose 里 app 只写 `depends_on: - kafka`（**容器级**，容器一 Created 就算满足），
+     此时 broker 还没开始应答 → app 的 `KafkaAdmin` 建主题失败
+  2. `spring.kafka.admin.fail-fast` 默认 `false` → **只记 WARN，静默跳过**，没人发现
+  3. 消费者随后请求元数据 → `UNKNOWN_TOPIC_OR_PARTITION` → 触发 broker 的
+     `auto.create.topics.enable=true`，按默认 `num.partitions=1` 把主题建了出来
+  4. `NewTopic` **不会修改已存在的主题** → 无论重启多少次都停在 1 分区
+
+  **为什么旧环境看起来是好的**：G1 那次修复只做了一半 ——
+  `KafkaTopicConfig` 的 `NewTopic` **从未真正生效**，当时能过是因为**手工执行过**
+  `kafka-topics --alter --partitions 3`。那一步不在仓库里，**不可复现**。
+
+  **修复（三层，都实测过）**：
+  | 层 | 改动 | 作用 |
+  | --- | --- | --- |
+  | 编排 | kafka 加 `healthcheck`（`kafka-broker-api-versions`）+ app 改 `condition: service_healthy` | 保证 broker 能应答后 app 才启动 |
+  | broker | `KAFKA_NUM_PARTITIONS=3` | 兜底：万一被 auto-create，也是 3 分区 |
+  | **应用** | **新增 `KafkaTopicInitializer`（替换死代码 `KafkaTopicConfig`）** | **根治**：显式 ensure，还能纠正已建错的主题 |
+
+  `KafkaTopicInitializer` 为什么必须自己写（而不是用 `NewTopic`）：
+  - `NewTopic` **只能创建、不能修改** —— 主题一旦被 auto-create 建错就永远救不回来
+  - 它实现 `SmartInitializingSingleton`，在**监听容器启动之前**执行，
+    保证消费者第一次请求元数据时主题已就位
+  - 三种情况全覆盖：不存在→建；已存在但分区少→**扩容**；已足够→不动（幂等）
+  - 失败只记 ERROR 不中断启动 —— 否则只会得到一个反复重启的容器，更难排查
+
+  **实测**：
+  ```
+  初始化器日志: Kafka 主题检查：期望 3 个，broker 上已有 0 个
+               已创建 Kafka 主题 banking-transfers（3 个分区）
+               已创建 Kafka 主题 banking-transfers.DLT（1 个分区）
+               已创建 Kafka 主题 banking-transfers.audit-DLT（1 个分区）
+  分区数:       banking-transfers = 3   DLT = 1   audit-DLT = 1   ← 与代码声明完全一致
+  验证:         26 PASS / 0 FAIL / 0 SKIP
+  ```
+
+- [x] **L2 顺带查明「为什么 KafkaAdmin 不建主题」** —— Spring Boot 4 把 Kafka 自动配置
+  拆成了独立模块，`KafkaProperties` 也从 `org.springframework.boot.autoconfigure.kafka`
+  搬走了（`L1` 的代码改用 `@Value("${spring.kafka.bootstrap-servers}")` 读配置，
+  **不依赖框架内部包路径**，避免小版本升级再次编译失败）。
+
+- [x] **L3 仓库卫生复查** —— `gradlew` 可执行位被 git 正确保留（`-rwxr-xr-x`）；
+  `.env` 从未进入提交历史；`.env.example` 里 5 个敏感键全是占位符；
+  无大文件、无密钥文件。**克隆即可编译**：`./gradlew clean test --rerun-tasks`
+  → `tests=43 failures=0 skipped=0`（不需要 Docker）。
+
+> **结论**：修完之后，陌生人克隆 → `cp .env.example .env` → `docker compose up -d --build`
+> → **约 130 秒应用就绪 → 26/26 全过**。这条路径现在是可复现的。
+>
+> **教训**：**「在我机器上能跑」的典型形态，是「有一句手工命令没写进仓库」。**
+> 任何改动如果靠手工命令补全，就等于没做完 —— 验收标准应该是「陌生人克隆后能跑通」。
 
 ---
 
