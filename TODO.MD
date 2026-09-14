@@ -390,6 +390,32 @@ git remote -v     # origin https://github.com/cjjhust/DIGITAL_BANKING.git
 > **教训**：短格式 `depends_on` 只解决「启动顺序」，不解决「依赖就绪」。
 > 只要下游进程会因为「对方没准备好」而**退出**，就必须用 `condition: service_healthy`；
 > 只要它是**观测/告警链路**上的一环，就必须给 `restart` 策略 —— 因为它挂了没人会注意到。
+
+> **L6 分析侧数据不落盘（同一轮发现的第四个问题，未改代码，已文档化）** —— 恢复本机
+> 环境后核对数据时发现 ClickHouse 的 `transaction_outcome` 从 5 行变成 0 行，
+> 而 Postgres 的用户数从 349 涨到 352（说明 Postgres 好好地持久化了）。
+> 查 compose 才明白：**ClickHouse 压根没挂数据卷**，只挂了个只读的 `./clickhouse-init`。
+>
+> 全栈普查：
+> ```
+> db             ✅ postgres-data
+> app / filebeat ✅ banking-logs
+> clickhouse / kafka / prometheus / grafana / elasticsearch   ⚠️ 无命名卷
+> ```
+>
+> 即除 Postgres 与日志外，**所有分析类与观测类数据都在容器可写层，容器一重建就归零**。
+> 影响：重启后 Grafana 的 ClickHouse 业务面板与 Prometheus 告警历史全是空的；想复现
+> README 里的截图证据，必须先重跑 `scripts/demo_traffic.py`。
+> 之所以一直没被发现，是因为 `clickhouse-init/*.sql` 挂在 `docker-entrypoint-initdb.d`，
+> 容器每次重建都会重新建表 —— 于是不报错，只是悄悄空了。
+>
+> **为什么最终没改**：对「让陌生人克隆后能跑通」这个首要目标，每次启动都是干净环境反而是
+> 优点 —— 不会有上次残留的 Kafka 消息、脏指标、过期告警状态。真要跨重启保留，加四个命名卷
+> 即可（具体挂载点已写进 README §9）。所以这里选择**如实记录**，而不是擅自改变默认行为。
+>
+> **教训**：`docker compose down` 不加 `-v` 只保证「有卷的不丢」，**没卷的照样全丢**。
+> 「我以为它会持久化」和「它真的持久化了」之间，差一次
+> `docker volume ls | grep <服务名>`。
 >
 > **教训**：**「在我机器上能跑」的典型形态，是「有一句手工命令没写进仓库」。**
 > 任何改动如果靠手工命令补全，就等于没做完 —— 验收标准应该是「陌生人克隆后能跑通」。
