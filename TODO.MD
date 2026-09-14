@@ -336,7 +336,30 @@ git remote -v     # origin https://github.com/cjjhust/DIGITAL_BANKING.git
   → `tests=43 failures=0 skipped=0`（不需要 Docker）。
 
 > **结论**：修完之后，陌生人克隆 → `cp .env.example .env` → `docker compose up -d --build`
-> → **约 130 秒应用就绪 → 26/26 全过**。这条路径现在是可复现的。
+> → **约 130 秒应用就绪 → 27/27 全过**。这条路径现在是可复现的。
+>
+> **L4 冷启动时序（同一轮发现的第二个 bug，已修）** —— 第一次完整验证时是
+> `21 PASS / 3 FAIL / 1 SKIP`，失败项 6/7/8 全是「转账卡在 PROCESSING」；
+> **立刻重跑一次就 26/26 全过**。
+>
+> 根因：`/actuator/health` 返回 200 **只说明 Spring 上下文就绪**，
+> 而 Kafka 消费者组的**首次分区分派**还要额外几秒：
+> ```
+> 23:19:26  Started BankingApplication in 17.744 seconds   ← health 已 200
+> 23:19:30  analytics-group: partitions assigned
+> 23:19:33  banking-group:  partitions assigned           ← 消费者 4~7 秒后才就绪
+> ```
+> 这期间发出去的转账消息只是躺在 broker 上没人消费，脚本立刻断言就会误判成功能坏了。
+> **面试官看到 health=200 就立刻跑脚本，必然踩到。**
+>
+> 修复：`verify_e2e.py` 开头加一道**冷启动就绪门**（检查项 `1b`）——
+> 用 `kafka-consumer-groups --describe` 确认 `banking-group` 的**每个分区都分到了
+> CONSUMER-ID** 才继续。这比「睡固定秒数」可靠：快的时候立刻返回，慢的时候愿意等（上限 120s）。
+>
+> 实测：冷启动后 health=200 **立刻**跑 → `27 PASS / 0 FAIL / 0 SKIP`。
+>
+> **教训**：「服务能起来」和「链路能用」是两件事。就绪探针要探测**真正的依赖**，
+> 而不是自己进程的存活状态。
 >
 > **教训**：**「在我机器上能跑」的典型形态，是「有一句手工命令没写进仓库」。**
 > 任何改动如果靠手工命令补全，就等于没做完 —— 验收标准应该是「陌生人克隆后能跑通」。

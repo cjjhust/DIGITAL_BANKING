@@ -43,6 +43,7 @@ import uuid
 PASSWORD = "password123"          # 脚本自己注册的临时用户
 TRANSFER_LIMIT = 10_000           # validateRisk 里的单笔限额，用于构造"超限"类失败
 STATUS_TIMEOUT_S = 25             # 等待异步链路（Outbox → Kafka → 消费者）完成的超时
+READY_TIMEOUT_S = 120             # 冷启动时等 Kafka 消费者分区分派完成的上限
 
 PASS, FAIL, SKIP = "PASS", "FAIL", "SKIP"
 results: list[tuple[str, str, str]] = []
@@ -56,6 +57,40 @@ def record(status: str, name: str, detail: str = "") -> None:
 def check(name: str, condition: bool, detail: str = "") -> bool:
     record(PASS if condition else FAIL, name, detail)
     return condition
+
+
+# ------------------------------------------------------------------- 冷启动就绪门
+
+
+def wait_for_consumers(kafka_container: str, timeout_s: int = READY_TIMEOUT_S) -> bool:
+    """等 Kafka 消费者组完成首次分区分派。
+
+    【为什么必须有这一步】`/actuator/health` 返回 200 只说明 Spring 上下文就绪，
+    但 Kafka 的消费者组还要**额外几秒**做首次 rebalance（2026-09-15 实测：
+    冷启动时 health 已 200，而 `banking-group` 的分区在 4~7 秒后才分配完）。
+    这期间发出去的转账消息只是躺在 broker 上没有消费者，脚本若立刻断言，
+    就会看到「卡在 PROCESSING」并误判为功能坏了。
+
+    判据：`banking-group` 的每个分区都分到了 CONSUMER-ID。
+    这比「睡固定秒数」可靠 —— 快的时候立刻返回，慢的时候愿意等。
+    拿不到 docker/Kafka 时返回 False，由调用方决定只告警不中断。
+    """
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        try:
+            out = subprocess.run(
+                ["docker", "exec", kafka_container, "kafka-consumer-groups",
+                 "--bootstrap-server", "localhost:9092", "--describe", "--group", "banking-group"],
+                capture_output=True, text=True, timeout=15).stdout
+            rows = [l.split() for l in out.splitlines()
+                    if "banking-transfers" in l and "banking-transfers." not in l]
+            # 有行说明分区已存在；CONSUMER-ID 非空说明已分派给消费者
+            if rows and all(len(r) >= 6 and r[5] != "-" for r in rows):
+                return True
+        except Exception:
+            pass
+        time.sleep(2)
+    return False
 
 
 # --------------------------------------------------------------------------- HTTP
@@ -187,6 +222,18 @@ def main() -> int:
     # 1. 健康检查
     status, body = call(base, "GET", "/actuator/health")
     check("1. 服务健康 UP", status == 200 and body.get("status") == "UP", f"{status} {body}")
+
+    # 1b. 冷启动就绪门：health=200 只代表 Spring 上下文就绪，
+    #     Kafka 消费者组的首次分区分派还要额外几秒。不等这一步，
+    #     下面的异步断言会在冷启动时误判（实测：全新克隆首次运行 3 项失败，
+    #     第二次立刻运行 26 项全过 —— 纯粹是时序问题）。
+    if args.skip_infra:
+        record(SKIP, "1b. 等待 Kafka 消费者分区分派（冷启动就绪门）", "--skip-infra")
+    else:
+        ready = wait_for_consumers(args.kafka_container)
+        record(PASS if ready else FAIL,
+               "1b. 等待 Kafka 消费者分区分派（冷启动就绪门）",
+               "banking-group 全部分区已分派" if ready else f"{READY_TIMEOUT_S}s 内仍未分派完成")
 
     # 2. 注册两个用户并开户（owner 与 attacker）
     token_a = register(base, "e2ea")
