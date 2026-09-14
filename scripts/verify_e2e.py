@@ -25,6 +25,8 @@ Digital Banking 端到端验证脚本（可复现、无第三方依赖）。
     --postgres-container banking-db
     --clickhouse-container banking-clickhouse
     --kafka-container     banking-kafka
+    --kafka-exporter-container banking-kafka-exporter
+    --kafka-exporter-url  http://localhost:9308/metrics
     --clickhouse-user admin --clickhouse-password secret
 
 退出码：0 = 全部通过（或仅有 SKIP）；1 = 存在 FAIL。
@@ -208,6 +210,8 @@ def main() -> int:
     parser.add_argument("--postgres-container", default="banking-db")
     parser.add_argument("--clickhouse-container", default="banking-clickhouse")
     parser.add_argument("--kafka-container", default="banking-kafka")
+    parser.add_argument("--kafka-exporter-container", default="banking-kafka-exporter")
+    parser.add_argument("--kafka-exporter-url", default="http://localhost:9308/metrics")
     parser.add_argument("--clickhouse-user", default="admin")
     parser.add_argument("--clickhouse-password", default="secret")
     args = parser.parse_args()
@@ -470,6 +474,30 @@ def main() -> int:
         partitions = len([line for line in desc.splitlines() if "Partition:" in line])
         check("25. 转账主题分区数 ≥ 3（与 concurrency=3 匹配）",
               ok and partitions >= 3, f"partitions={partitions}")
+
+    # 25b. kafka-exporter 必须活着并真的产出 lag 指标。
+    #      它是 prometheus/banking-alerts.yml 里 4 条 pipeline 规则（消费积压、
+    #      DLT 堆积等）的唯一数据源。2026-09-15 冷启动审计发现：它原先用短格式
+    #      `depends_on: - kafka`（等价 service_started）抢跑，broker 未就绪就
+    #      Exited(255)，且没有重启策略 —— lag 指标从此永久消失，告警静默不报。
+    #      静默失败比告警误报更危险，所以这里直接断言指标在。
+    if args.skip_infra:
+        record(SKIP, "25b. kafka-exporter 产出 consumer lag 指标（--skip-infra）")
+    else:
+        running = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Running}}", args.kafka_exporter_container],
+            capture_output=True, text=True).stdout.strip()
+        metric = ""
+        try:
+            with urllib.request.urlopen(args.kafka_exporter_url, timeout=10) as response:
+                metric = next((line for line in response.read().decode().splitlines()
+                               if line.startswith("kafka_consumergroup_lag{")), "")
+        except Exception:
+            pass
+        check("25b. kafka-exporter 产出 consumer lag 指标（4 条 pipeline 告警的数据源）",
+              running == "true" and bool(metric),
+              f"running={running or 'not-found'} " +
+              ("已提供 kafka_consumergroup_lag" if metric else "未取到 kafka_consumergroup_lag"))
 
     # 26. GDPR 匿名化必须断开关联链：只抹用户名/邮箱是「假名化」，
     #     user_id → account_no → 流水 这条链还在就仍然属于个人数据（Art. 4(1)）。

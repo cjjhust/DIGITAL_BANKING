@@ -174,8 +174,17 @@ services:
     image: danielqsj/kafka-exporter:latest
     container_name: banking-kafka-exporter
     command: ["--kafka.server=kafka:9092"]
+    # 【必须用 service_healthy，不能写短格式 `- kafka`】
+    # 短格式等价于 service_started，只保证容器「已创建」，不保证 broker 能应答。
+    # 2026-09-15 冷启动审计实测：exporter 抢跑连不上 broker 就 Exited(255)，
+    # 之后不会自己回来 —— kafka_consumergroup_lag 永久消失，
+    # 而 prometheus/banking-alerts.yml 里 4 条 pipeline 规则全靠它，
+    # 结果是「告警静默失败」，比告警误报更危险。
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
+    # 观测侧车不能一死就永久沉默：Kafka 后续重启时 exporter 也需要重连。
+    restart: unless-stopped
     ports:
       - "127.0.0.1:9308:9308"
     networks:

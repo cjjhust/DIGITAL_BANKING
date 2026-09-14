@@ -19,7 +19,7 @@ This project is a high-throughput digital banking backend built with Java 21, Sp
 - Spring Security and JWT-based authentication with `USER` / `ADMIN` and `@PreAuthorize`; logout (Redis blacklist) and refresh rotation
 - Flyway schema migrations (`ddl-auto: validate`) — `V1` … `V8`
 - **ArchUnit constraints** pinning layering and Kafka listener wiring (`containerFactory` must be explicit, no `topicPattern`)
-- **Reproducible verification**: `scripts/verify_e2e.py` (27 checks) plus GitHub Actions CI
+- **Reproducible verification**: `scripts/verify_e2e.py` (28 checks) plus GitHub Actions CI
 - Java 21 virtual threads
 - Docker Compose local environment simulation
 
@@ -601,7 +601,7 @@ flowchart LR
 
 - **单元测试**：`AccountServiceTest`、`TransferInternalServiceTest`、`AuthServiceTest`、`TransferEventConsumerTest`、`JwtUtilsTest`、`AccountAccessServiceTest`、`GdprServiceTest`、`DlqListenerTest` 等共 **43 个测试 / 9 个测试类**（实测 `tests=43 failures=0`），`./gradlew test` 约 5 秒跑完，不需要 Docker。
 - **ArchUnit**：`ArchitectureTest.java` 强制 Controller 不直接依赖 Repository、Service 层访问受限，并新增 2 条 Kafka 约束（`@KafkaListener` 必须显式声明 `containerFactory`；禁止 `topicPattern` 通配订阅）—— 已做反向对照：删掉 `containerFactory` 测试立即变红。
-- **端到端验证**：`scripts/verify_e2e.py` 针对运行中的 Compose 全栈跑 **27 项检查**（鉴权、越权、成功、失败原因、幂等、状态查询、自转账、金额精度、GDPR、ClickHouse 审计、死信守卫三项对照、复式记账借贷与全账平衡），退出码 0/1；`scripts/batch_transfer_demo.py` 用于批量压量（不依赖 Testcontainers）。
+- **端到端验证**：`scripts/verify_e2e.py` 针对运行中的 Compose 全栈跑 **28 项检查**（鉴权、越权、成功、失败原因、幂等、状态查询、自转账、金额精度、GDPR、ClickHouse 审计、**告警数据源健康**、死信守卫三项对照、复式记账借贷与全账平衡），退出码 0/1；`scripts/batch_transfer_demo.py` 用于批量压量（不依赖 Testcontainers）。
 - **Swagger / OpenAPI**：`/swagger-ui/index.html` 与 `/v3/api-docs` 实测可用（已升级到 springdoc-openapi 3.1.1，2.x 与 Boot 4 不兼容）。默认只在开发放行，由 `app.security.expose-api-docs` 控制（`application-prod.yml` 里为 `false`），因此生产环境接口文档不对外暴露。
 
 ### 7. 运行命令
@@ -656,7 +656,7 @@ python3 scripts/verify_e2e.py
 > - **可观测性**：Micrometer Tracing（TraceId/SpanId），Prometheus 指标、Grafana 仪表盘、Filebeat + Elasticsearch 日志链路。
 > - **架构约束**：ArchUnit 测试强制 Controller→Service→Repository 分层。
 > - **安全与认证**：Spring Security + JWT，角色声明与 `@PreAuthorize`。
-> - **测试**：43 个单元/架构测试（9 个测试类，约 5 秒，无需 Docker），端到端验证用 `scripts/verify_e2e.py`（27 项断言）。
+> - **测试**：43 个单元/架构测试（9 个测试类，约 5 秒，无需 Docker），端到端验证用 `scripts/verify_e2e.py`（28 项断言）。
 
 ---
 
@@ -676,7 +676,7 @@ python3 scripts/verify_e2e.py
 | 基础设施 | 已加固：基础设施端口全部只绑 `127.0.0.1`，Redis 强制 `--requirepass`，Grafana 口令从 `.env` 注入且关闭注册，应用镜像不再安装 OpenSSH。剩余：Prometheus / ClickHouse / Elasticsearch / Kibana 仍无鉴权（本地单机假设），生产需接 SSO / TLS / 反向代理 |
 | Swagger | 已实测可用（springdoc 3.1.1 + `/swagger-ui/index.html`、`/v3/api-docs`）；默认仅开发环境放行，生产由 `app.security.expose-api-docs=false` 关闭 |
 | 日志 | 默认关闭 `show-sql` 与 Hibernate 参数级日志（`SPRING_JPA_SHOW_SQL=true` 可临时打开），避免 SQL 参数（PII）进 Elasticsearch |
-| 自动化 | 43 个单元/架构测试（9 个类，含 Kafka 监听器约束）+ `scripts/verify_e2e.py`（27 项端到端断言，退出码 0/1）；CI 见 `.github/workflows/ci.yml`（`./gradlew test` + `bootJar` + 上传测试报告，不含需要 Docker 的端到端） |
+| 自动化 | 43 个单元/架构测试（9 个类，含 Kafka 监听器约束）+ `scripts/verify_e2e.py`（28 项端到端断言，退出码 0/1）；CI 见 `.github/workflows/ci.yml`（`./gradlew test` + `bootJar` + 上传测试报告，不含需要 Docker 的端到端） |
 
 ---
 
@@ -712,7 +712,7 @@ python3 scripts/verify_e2e.py
 - **追踪**：Micrometer + OpenTelemetry，traceId 通过 Kafka header 跨进程传播（自定义生产者拦截器），业务单号进 Baggage/MDC。
 - **指标**：转账成功/失败 Counter、耗时 Timer、Redis 幂等命中率；Grafana 面板看 TPS / 失败率 / 延迟。
 - **日志**：JSON → Filebeat → Elasticsearch；默认关闭 SQL 参数日志，避免 PII 外流。
-- **验证**：`./gradlew test`（43 个单元/架构测试，约 5 秒）+ `python3 scripts/verify_e2e.py`（27 项端到端断言：健康、越权、成功、失败原因、幂等、参数校验、自转账、金额精度、GDPR、ClickHouse 审计、死信守卫、复式记账）。
+- **验证**：`./gradlew test`（43 个单元/架构测试，约 5 秒）+ `python3 scripts/verify_e2e.py`（28 项端到端断言：健康、越权、成功、失败原因、幂等、参数校验、自转账、金额精度、GDPR、ClickHouse 审计、死信守卫、复式记账）。
 
 #### 5) 已知不足
 
@@ -810,7 +810,7 @@ flowchart LR
 
 - **Unit tests**: **43 tests across 9 classes** (`AccountServiceTest`, `TransferInternalServiceTest`, `AuthServiceTest`, `TransferEventConsumerTest`, `JwtUtilsTest`, `AccountAccessServiceTest`, `GdprServiceTest`, `DlqListenerTest`, …) — measured `tests=43 failures=0`; `./gradlew test` finishes in ~5s without Docker.
 - **ArchUnit**: `ArchitectureTest.java` enforces that controllers do not depend directly on repositories, service access is restricted, and adds 2 Kafka rules (`@KafkaListener` must declare `containerFactory` explicitly; `topicPattern` subscriptions are banned). Reverse-verified: removing `containerFactory` turns the test red immediately.
-- **End-to-end check**: `scripts/verify_e2e.py` runs **27 checks** against the running Compose stack (auth, IDOR, success, failure reason, idempotency, status lookup, self-transfer, amount scale, GDPR, ClickHouse audit, three DLQ-guard contrasts, double-entry debit/credit and per-currency balance) with exit code 0/1; `scripts/batch_transfer_demo.py` generates bulk load (no Testcontainers).
+- **End-to-end check**: `scripts/verify_e2e.py` runs **28 checks** against the running Compose stack (auth, IDOR, success, failure reason, idempotency, status lookup, self-transfer, amount scale, GDPR, ClickHouse audit, three DLQ-guard contrasts, **alerting data-source health**, double-entry debit/credit and per-currency balance) with exit code 0/1; `scripts/batch_transfer_demo.py` generates bulk load (no Testcontainers).
 - **Swagger / OpenAPI**: `/swagger-ui/index.html` and `/v3/api-docs` are verified working (upgraded to springdoc-openapi 3.1.1; 2.x is incompatible with Boot 4). Docs are only permitted in development via `app.security.expose-api-docs` (`false` in `application-prod.yml`), so production does not expose the API structure.
 
 ### 7. Run Commands
@@ -1074,7 +1074,7 @@ Passwort. `critical` → Priorität 5, `warning` → 3, Entwarnung → 2.
 
 - **Unit-Tests**: **43 Tests in 9 Klassen** (`AccountServiceTest`, `TransferInternalServiceTest`, `AuthServiceTest`, `TransferEventConsumerTest`, `JwtUtilsTest`, `AccountAccessServiceTest`, `GdprServiceTest`, `DlqListenerTest`, …) — gemessen `tests=43 failures=0`; `./gradlew test` läuft in ~5s ohne Docker.
 - **ArchUnit**: `ArchitectureTest.java` stellt sicher, dass Controller nicht direkt auf Repositories zugreifen, Service-Zugriffe eingeschränkt sind, und erzwingt 2 Kafka-Regeln (`@KafkaListener` muss `containerFactory` explizit angeben; `topicPattern`-Abonnements sind verboten). Gegenprobe: Entfernt man `containerFactory`, wird der Test sofort rot.
-- **Ende-zu-Ende-Prüfung**: `scripts/verify_e2e.py` führt **27 Prüfungen** gegen den laufenden Compose-Stack aus (Auth, IDOR, Erfolg, Fehlergrund, Idempotenz, Statusabfrage, Selbstüberweisung, Betragsgenauigkeit, DSGVO, ClickHouse-Audit, drei DLQ-Guard-Gegenproben, doppelte Buchführung Soll/Haben und Saldenausgleich je Währung) mit Exit-Code 0/1; `scripts/batch_transfer_demo.py` erzeugt Last (ohne Testcontainers).
+- **Ende-zu-Ende-Prüfung**: `scripts/verify_e2e.py` führt **28 Prüfungen** gegen den laufenden Compose-Stack aus (Auth, IDOR, Erfolg, Fehlergrund, Idempotenz, Statusabfrage, Selbstüberweisung, Betragsgenauigkeit, DSGVO, ClickHouse-Audit, drei DLQ-Guard-Gegenproben, **Gesundheit der Alarm-Datenquelle**, doppelte Buchführung Soll/Haben und Saldenausgleich je Währung) mit Exit-Code 0/1; `scripts/batch_transfer_demo.py` erzeugt Last (ohne Testcontainers).
 - **Swagger / OpenAPI**: `/swagger-ui/index.html` und `/v3/api-docs` funktionieren (Upgrade auf springdoc-openapi 3.1.1; 2.x ist mit Boot 4 inkompatibel). Freigabe nur in der Entwicklung über `app.security.expose-api-docs` (`false` in `application-prod.yml`).
 
 ### 7. Ausführungsbefehle
@@ -1114,7 +1114,7 @@ Ports: App `8080`, Grafana `3000`, Prometheus `9090`, Kibana `5601`, Zipkin `941
 > - **Beobachtbarkeit**: Micrometer Tracing (`TraceId`/`SpanId`), Prometheus, Grafana, Filebeat + Elasticsearch.
 > - **Architektur-Constraints**: ArchUnit Controller→Service→Repository.
 > - **Sicherheit**: Spring Security + JWT, Rollen-Claims, `@PreAuthorize`.
-> - **Tests**: 43 Unit-/Architektur-Tests (9 Testklassen, ~5s, ohne Docker); Ende-zu-Ende-Prüfung über `scripts/verify_e2e.py` (27 Zusicherungen).
+> - **Tests**: 43 Unit-/Architektur-Tests (9 Testklassen, ~5s, ohne Docker); Ende-zu-Ende-Prüfung über `scripts/verify_e2e.py` (28 Zusicherungen).
 
 ---
 

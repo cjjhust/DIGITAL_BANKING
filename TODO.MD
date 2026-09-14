@@ -7,7 +7,7 @@
 
 ## 0. 交接：关掉项目后怎么回来
 
-**当前状态**：10 个服务全部健康，`./gradlew test` 通过，`verify_e2e.py` 26/26 通过。
+**当前状态**：10 个服务全部健康，`./gradlew test` 通过，`verify_e2e.py` 28/28 通过。
 
 ### 重新启动
 
@@ -35,7 +35,7 @@ docker compose stop        # 保留容器与数据卷（推荐，下次起得快
 
 ```bash
 ./gradlew test                 # 43 个测试，不需要 Docker
-python3 scripts/verify_e2e.py  # 26 项端到端断言，需要栈在跑
+python3 scripts/verify_e2e.py  # 28 项端到端断言，需要栈在跑
 ```
 
 ### ★ 真正的验收标准：陌生人克隆能不能跑通
@@ -54,7 +54,8 @@ python3 scripts/verify_e2e.py  # 期望 26 PASS / 0 FAIL
 ⚠️ 跑之前先 `docker compose down` 停掉原环境 —— 本项目用了**固定的 `container_name`**，
 两套栈不能同时起。
 
-> 2026-09-15 用这个方法发现了 L1（主题分区数竞态），修完才做到 26/26。
+> 2026-09-15 用这个方法发现了 L1（主题分区数竞态）、L4（冷启动时序）、L5（指标源静默死亡），
+> 修完才做到 28/28。
 > **以后任何改动，都用这条路径验收。**
 
 ### 全部入口
@@ -90,7 +91,7 @@ git remote -v     # origin https://github.com/cjjhust/DIGITAL_BANKING.git
 | 检查项 | 命令 | 实测结果 |
 | --- | --- | --- |
 | 单元 + 架构测试 | `./gradlew test` | `BUILD SUCCESSFUL`，`tests=43 / failures=0 / skipped=0`（9 个测试类，约 5s，**不需要 Docker**） |
-| 端到端验收 | `docker compose up -d` 后 `python3 scripts/verify_e2e.py` | `26 PASS / 0 FAIL / 0 SKIP`，退出码 0（2026-09-13 从 24 项扩到 26 项） |
+| 端到端验收 | `docker compose up -d` 后 `python3 scripts/verify_e2e.py` | `28 PASS / 0 FAIL / 0 SKIP`，退出码 0（2026-09-13 从 24 项扩到 26 项；2026-09-15 冷启动审计再加 `1b` 就绪门与 `25b` 指标源健康 → 28 项） |
 | 数据库迁移 | 启动后查 `flyway_schema_history` | `V1`–`V8` 全部 `success = t`（含 `V8 double entry ledger currency and lease`） |
 | 打包 | `./gradlew bootJar` | 成功 |
 | CI | `.github/workflows/ci.yml` | `./gradlew test` → `bootJar` → 上传测试报告 |
@@ -336,11 +337,11 @@ git remote -v     # origin https://github.com/cjjhust/DIGITAL_BANKING.git
   → `tests=43 failures=0 skipped=0`（不需要 Docker）。
 
 > **结论**：修完之后，陌生人克隆 → `cp .env.example .env` → `docker compose up -d --build`
-> → **约 130 秒应用就绪 → 27/27 全过**。这条路径现在是可复现的。
+> → **约 130 秒应用就绪 → 28/28 全过**。这条路径现在是可复现的。
 >
 > **L4 冷启动时序（同一轮发现的第二个 bug，已修）** —— 第一次完整验证时是
 > `21 PASS / 3 FAIL / 1 SKIP`，失败项 6/7/8 全是「转账卡在 PROCESSING」；
-> **立刻重跑一次就 26/26 全过**。
+> **立刻重跑一次就全过**（当时脚本是 26 项，现在是 28 项）。
 >
 > 根因：`/actuator/health` 返回 200 **只说明 Spring 上下文就绪**，
 > 而 Kafka 消费者组的**首次分区分派**还要额外几秒：
@@ -360,6 +361,35 @@ git remote -v     # origin https://github.com/cjjhust/DIGITAL_BANKING.git
 >
 > **教训**：「服务能起来」和「链路能用」是两件事。就绪探针要探测**真正的依赖**，
 > 而不是自己进程的存活状态。
+>
+> 修复：`docker compose` 里把 `depends_on: - kafka` 改成
+> `kafka: {condition: service_healthy}`，并加 `restart: unless-stopped`
+> （观测侧车不能一死就永久沉默，Kafka 后续重启时 exporter 也要重连）。
+> `verify_e2e.py` 同步新增检查项 `25b`：断言容器在跑 **且** 真的取到
+> `kafka_consumergroup_lag`。只查「容器在不在」不够 —— 容器活着但连不上 broker
+> 时指标同样是空的。
+>
+> 实测：`docker compose down` → `up -d --build` 冷启动 → health 135 秒
+> → `kafka-exporter` `Up`（此前是 `Exited (255)`）→ **28 PASS / 0 FAIL / 0 SKIP**。
+>
+> **L5 告警数据源静默死亡（同一轮发现的第三个 bug，已修）** —— 在恢复本机环境时
+> 顺手数了一下容器：**15 / 16**，少的正是 `kafka-exporter`，状态 `Exited (255)`。
+>
+> 根因与 L1 同源，但更隐蔽：它写的是 `depends_on: - kafka`（短格式 = `service_started`），
+> 只保证**容器已创建**，不保证 broker 能应答。冷启动时 exporter 抢跑、连不上 broker、
+> 直接退出；而它**没有任何 restart 策略**，于是再也不会回来。
+>
+> 后果：`kafka_consumergroup_lag` 指标从此永久消失，而
+> `prometheus/banking-alerts.yml` 的 `banking-pipeline` 组 **4 条规则全靠它**。
+> Prometheus 查不到序列时不会报错，只会**不出结果** —— 也就是告警静默失败。
+> 这比告警误报危险得多：误报会让人去查，静默会让人以为一切正常。
+>
+> 为什么之前没发现：`verify_e2e.py` 原来只验业务链路，不验观测链路。
+> **一个不检查自己监控的监控系统，等于没有监控。**
+>
+> **教训**：短格式 `depends_on` 只解决「启动顺序」，不解决「依赖就绪」。
+> 只要下游进程会因为「对方没准备好」而**退出**，就必须用 `condition: service_healthy`；
+> 只要它是**观测/告警链路**上的一环，就必须给 `restart` 策略 —— 因为它挂了没人会注意到。
 >
 > **教训**：**「在我机器上能跑」的典型形态，是「有一句手工命令没写进仓库」。**
 > 任何改动如果靠手工命令补全，就等于没做完 —— 验收标准应该是「陌生人克隆后能跑通」。
@@ -1120,7 +1150,7 @@ runtimeOnly  'org.flywaydb:flyway-database-postgresql'  // PostgreSQL 方言需�
 > **单元测试验证「逻辑」，集成/端到端验证「接线」。**
 > 接线错误（依赖、配置项名、topic 名、事务传播、日志级别）的共同特征是：**编译通过、单测全绿、启动不报错、但功能就是不通**。唯一能抓到它们的是「真跑一遍 + 看日志和数据库」。
 
-所以 `scripts/verify_e2e.py` 不只是演示工具，它是这个项目**最重要的质量闸门**：一条命令、26 项断言、退出码 0/1。
+所以 `scripts/verify_e2e.py` 不只是演示工具，它是这个项目**最重要的质量闸门**：一条命令、28 项断言、退出码 0/1。
 
 ### 三条可复用的工程习惯
 
